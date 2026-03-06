@@ -1,0 +1,33 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Run Custom Log Linter
+        run: go run ./cmd/linter/main.go ./...
+
+      - name: Run Tests with Coverage
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Check Coverage
+        run: |
+          go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//' | xargs -I{} node -e "if ({} < 50) process.exit(1)"
