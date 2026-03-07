@@ -1,4 +1,4 @@
-module linter
+module github.com/MishaSytch/linter
 
 go 1.24.0
 
