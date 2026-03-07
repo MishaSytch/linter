@@ -18,7 +18,7 @@ var easyOk = []string{
 	"123 - = _ + asd 4985 BigWord",
 }
 
-func testLog_easy() {
+func testLogWhenEasyThenOk() {
 	log.Print(easyMsgLowerCaseRules) // want "log message should start with a lowercase letter"
 	log.Print(easyMsgEnglish)        // want "log message should be in English"
 	log.Print(easyMsgSpecialChars)   // want "log message shouldn`t contain special characters or emojis"
@@ -29,7 +29,7 @@ func testLog_easy() {
 	}
 }
 
-func testSlog_easy() {
+func testSlogWhenEasyThenOk() {
 	slog.Error(easyMsgLowerCaseRules) // want "log message should start with a lowercase letter"
 	slog.Error(easyMsgEnglish)        // want "log message should be in English"
 	slog.Error(easyMsgSpecialChars)   // want "log message shouldn`t contain special characters or emojis"

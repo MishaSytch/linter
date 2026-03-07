@@ -17,7 +17,7 @@ const (
 	cyrillicMixed        = "log level: очень высокий"
 )
 
-func testLog_Hard() {
+func testLogWhenHardThenOk() {
 	log.Print("Fatal" + " error!" + easyMsgSpecialChars) // want "log message should start with a lowercase letter" "log message shouldn`t contain special characters or emojis"
 	log.Print(typedLowerMsg)                             // want "log message should start with a lowercase letter"
 	log.Print(hardMsgWithEmoji)                          // want "log message should start with a lowercase letter" "log message shouldn`t contain special characters or emojis"
@@ -25,18 +25,18 @@ func testLog_Hard() {
 	log.Printf("critical error: %s", sensitiveData)      // want "log message contains potentially sensitive data: token"
 }
 
-func testAdvanced_Nested() {
+func testSlogWhenHardThenOk() {
+	msgFromFunc := func() string { return "Dynamic Error" }
+	slog.Error(msgFromFunc())
+}
+
+func testWhenAdvancedNestedThenOk() {
 	log.Print(fmt.Sprintf("User password is: %s", "12345")) // want "log message should start with a lowercase letter" "log message contains potentially sensitive data: password"
 }
 
-func testEdgeCases_Correct() {
+func testWhenEdgeCasesThenOk() {
 	log.Print("123 system is up")
 	log.Print("...loading configuration")
 	log.Print("v1.0.4 deployed")
 	log.Print("")
-}
-
-func testZap_Hard() {
-	msgFromFunc := func() string { return "Dynamic Error" }
-	slog.Error(msgFromFunc())
 }
