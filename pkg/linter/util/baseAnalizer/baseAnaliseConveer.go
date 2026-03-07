@@ -7,6 +7,7 @@ import (
 	"linter/pkg/config"
 	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -89,24 +90,41 @@ func applySyntaxFix(res *analysisResult) {
 func applySensitiveFix(res *analysisResult) {
 	tempMsg := res.fixedMsg
 	lowerMsg := strings.ToLower(tempMsg)
-	var foundWords []string
+	var foundIssues []string
 
-	for _, kw := range cfg.SensitiveWords {
-		if strings.Contains(lowerMsg, kw) {
-			foundWords = append(foundWords, kw)
+	for _, kw := range cfg.SensitiveRules.SensitiveWords {
+		lowerKw := strings.ToLower(kw)
+		if strings.Contains(lowerMsg, lowerKw) {
+			foundIssues = append(foundIssues, kw)
 			mask := strings.Repeat("*", len(kw))
 			tempMsg = strings.ReplaceAll(tempMsg, kw, mask)
 		}
 	}
 
-	if len(foundWords) > 0 {
+	for _, p := range cfg.SensitiveRules.Patterns {
+		re, err := regexp.Compile(p.Regex)
+		if err != nil {
+			continue
+		}
+
+		if re.MatchString(tempMsg) {
+			foundIssues = append(foundIssues, p.Name)
+			tempMsg = re.ReplaceAllString(tempMsg, "********")
+		}
+	}
+
+	if len(foundIssues) > 0 {
 		res.fixedMsg = tempMsg
-		msg := fmt.Sprintf("log message contains potentially sensitive data: %s", strings.Join(foundWords, ", "))
+
+		msg := fmt.Sprintf("log message contains potentially sensitive data: %s",
+			strings.Join(foundIssues, ", "))
+
 		res.errors = append(res.errors, msg)
 	}
 }
+
 func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
-	if cfg.Output.TestConfig {
+	if cfg.Output.TestRun {
 		for _, errStr := range res.errors {
 			pass.Report(analysis.Diagnostic{
 				Pos:     arg.Pos(),

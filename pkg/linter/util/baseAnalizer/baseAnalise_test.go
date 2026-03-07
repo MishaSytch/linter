@@ -45,7 +45,16 @@ func setupBaseTest() (model.Reporter, *[]string) {
 func TestBaseAnalyzer(t *testing.T) {
 	mock, reports := setupBaseTest()
 	m := mock.(*MockReporter)
-	testCfg := &config.Config{SensitiveWords: []string{"secret"}}
+	testCfg := &config.Config{
+		SensitiveRules: config.SensitiveRules{
+			SensitiveWords: []string{"secret"},
+			Patterns:       []config.SensitivePattern{},
+		},
+		Output: config.OutputConfig{
+			ErrorsAggregate: true,
+			TestRun:         true,
+		},
+	}
 	tests := []struct {
 		name    string
 		msg     string
@@ -246,7 +255,21 @@ func Test_checkSpecialCharsSyntax(t *testing.T) {
 
 func Test_checkSensitiveData(t *testing.T) {
 	pass, reports := setupBaseTest()
-	cfg = &config.Config{SensitiveWords: []string{"password", "token"}}
+	cfg = &config.Config{
+		SensitiveRules: config.SensitiveRules{
+			SensitiveWords: []string{"secret"},
+			Patterns: []config.SensitivePattern{
+				{
+					Name:  "API_KEY",
+					Regex: `(?i)api_key_[a-z0-9]{10}`,
+				},
+			},
+		},
+		Output: config.OutputConfig{
+			TestRun: true,
+		},
+	}
+
 	tests := []struct {
 		name    string
 		msg     string
@@ -258,23 +281,33 @@ func Test_checkSensitiveData(t *testing.T) {
 			false,
 		},
 		{
-			"Leak password",
-			"my password is 123",
+			"Leak keyword (case insensitive)",
+			"my SECRET_TOKEN_HERE",
 			true,
 		},
 		{
-			"Leak token",
-			"SECRET_TOKEN_HERE",
+			"Leak pattern (Regexp)",
+			"setting up api_key_1234567890",
+			true,
+		},
+		{
+			"Double leak (Keyword + Pattern)",
+			"secret and api_key_abcdefghij",
 			true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			*reports = nil
-			checkSensitiveData(pass, &ast.BasicLit{}, tt.msg)
+
+			expr := &ast.BasicLit{Value: `"` + tt.msg + `"`}
+
+			checkSensitiveData(pass, expr, tt.msg)
 
 			if (len(*reports) > 0) != tt.wantErr {
-				t.Errorf("checkSensitiveData() '%s' error = %v", tt.msg, len(*reports) > 0)
+				t.Errorf("%s: checkSensitiveData() '%s' got error = %v, want %v",
+					tt.name, tt.msg, len(*reports) > 0, tt.wantErr)
 			}
 		})
 	}
