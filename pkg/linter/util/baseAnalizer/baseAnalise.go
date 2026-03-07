@@ -1,26 +1,28 @@
-package util
+package baseAnalizer
 
 import (
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
+	"linter/pkg/config"
 	"linter/pkg/linter/model"
+	"linter/pkg/linter/util"
 	"strings"
 	"unicode"
 )
 
-type textErrors map[string]bool
-
-type textSyntaxChecker func(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune)
+var cfg *config.Config
 
 // BaseAnalyzer базовый анализатор кода
-func BaseAnalyzer(pass *analysis.Pass, arg ast.Expr) {
+func BaseAnalyzer(pass *analysis.Pass, arg ast.Expr, config *config.Config) {
+	cfg = config
+
 	var msg string
 
 	if tv, ok := pass.TypesInfo.Types[arg]; ok && tv.Value != nil {
 		msg = strings.Trim(tv.Value.ExactString(), `"`+"`")
 	} else {
-		if subCall, ok := arg.(*ast.CallExpr); ok && IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
-			BaseAnalyzer(pass, subCall.Args[0])
+		if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
+			BaseAnalyzer(pass, subCall.Args[0], config)
 		}
 		return
 	}
@@ -29,9 +31,15 @@ func BaseAnalyzer(pass *analysis.Pass, arg ast.Expr) {
 		return
 	}
 
-	checkFirstLetterCase(pass, arg, msg)
-	checkTextSyntax(pass, arg, msg)
-	checkSensitiveData(pass, arg, msg)
+	checkers := []errorsChecker{
+		checkFirstLetterCase,
+		checkTextSyntax,
+		checkSensitiveData,
+	}
+
+	for _, checker := range checkers {
+		checker(pass, arg, msg)
+	}
 }
 
 // checkFirstLetterCase проверяет, что сообщение начинается со строчной буквы
@@ -61,6 +69,17 @@ func checkTextSyntax(pass *analysis.Pass, arg ast.Expr, msg string) {
 	}
 }
 
+// checkSensitiveData ищет утечки секретов в тексте сообщения
+func checkSensitiveData(pass *analysis.Pass, arg ast.Expr, msg string) {
+	lowerMsg := strings.ToLower(msg)
+	for _, kw := range cfg.SensitiveWords {
+		if strings.Contains(lowerMsg, kw) {
+			pass.Reportf(arg.Pos(), model.MsgSensitiveData, kw)
+			break
+		}
+	}
+}
+
 // checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
 func checkOnlyEnglishSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune) {
 	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
@@ -81,16 +100,5 @@ func checkSpecialCharsSyntax(pass *analysis.Pass, arg ast.Expr, errors textError
 	if !unicode.IsLetter(r) {
 		pass.Reportf(arg.Pos(), model.MsgSpecialChars)
 		errors[model.MsgSpecialChars] = true
-	}
-}
-
-// checkSensitiveData ищет утечки секретов в тексте сообщения
-func checkSensitiveData(pass *analysis.Pass, arg ast.Expr, msg string) {
-	lowerMsg := strings.ToLower(msg)
-	for _, kw := range model.SensitiveKeywords {
-		if strings.Contains(lowerMsg, kw) {
-			pass.Reportf(arg.Pos(), model.MsgSensitiveData, kw)
-			break
-		}
 	}
 }
