@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
+	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
 	"linter/pkg/linter/util/baseAnalizer"
 )
@@ -16,7 +17,7 @@ var Analyzer = &analysis.Analyzer{
 }
 
 // ArgumentAnalyzer функциональный тип для анализа кода
-type ArgumentAnalyzer func(pass baseAnalizer.Reporter, arg ast.Expr, config *config.Config)
+type ArgumentAnalyzer func(pass model.Reporter, arg ast.Expr, config *config.Config)
 
 var configPath string
 
@@ -27,7 +28,7 @@ func init() {
 func run(pass *analysis.Pass) (interface{}, error) {
 	cfg := config.LoadConfig(configPath)
 
-	wrapper := baseAnalizer.PassWrapper{Pass: pass}
+	wrapper := model.PassWrapper{Pass: pass}
 
 	var checkArg ArgumentAnalyzer = baseAnalizer.BaseAnalyzer
 
