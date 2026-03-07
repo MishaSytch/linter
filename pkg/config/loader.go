@@ -16,6 +16,12 @@ func LoadConfig(path string) *Config {
 		cfg = &Config{
 			Loggers:        model.LoggerList,
 			SensitiveWords: model.SensitiveKeywords,
+			Output: OutputConfig{
+				ShowInConsole:   false,
+				ShowSuggestions: false,
+				ErrorsAggregate: false,
+				TestConfig:      true,
+			},
 		}
 
 		f, err := os.Open(path)

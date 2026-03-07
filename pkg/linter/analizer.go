@@ -30,7 +30,13 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	wrapper := model.PassWrapper{Pass: pass}
 
-	var checkArg ArgumentAnalyzer = baseAnalizer.BaseAnalyzer
+	var checkArg ArgumentAnalyzer
+	if cfg.Output.ErrorsAggregate {
+		checkArg = baseAnalizer.BaseAggregateAnalyzer
+
+	} else {
+		checkArg = baseAnalizer.BaseAnalyzer
+	}
 
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
