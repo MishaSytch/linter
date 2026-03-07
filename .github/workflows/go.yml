@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24.5'
           cache: true
 
       - name: Tidy dependencies
@@ -24,10 +24,6 @@ jobs:
 
       - name: Verify Dependencies
         run: go mod verify
-
-      - name: Run Custom Log Linter
-        run: go run ./cmd/linter/main.go ./...
-        continue-on-error: true
 
       - name: Run Tests with Coverage
         run: go test -v -coverprofile=coverage.out ./...
@@ -42,3 +38,16 @@ jobs:
             echo "Error: Coverage is too low ($total_cov%). Expected at least 50%."
             exit 1
           fi
+
+      - name: Run Custom Log Linter
+        run: go run ./cmd/linter/main.go ./...
+        continue-on-error: true
+
+      - name: Build Linter Plugin
+        run: |
+          CGO_ENABLED=1 go build -buildmode=plugin -o loglint.so ./plugin/main.go
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.5
+          args: --config=.golangci.yml run ./internal/exampleProject/...
