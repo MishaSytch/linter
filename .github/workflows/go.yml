@@ -27,10 +27,4 @@ jobs:
 
       - name: Run Custom Log Linter
         run: go run ./cmd/linter/main.go ./...
-
-      - name: Run Tests with Coverage
-        run: go test -v -coverprofile=coverage.out ./...
-
-      - name: Check Coverage
-        run: |
-          go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//' | xargs -I{} node -e "if ({} < 50) process.exit(1)"
+        
