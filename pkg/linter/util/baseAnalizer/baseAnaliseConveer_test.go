@@ -2,13 +2,13 @@ package baseAnalizer
 
 import (
 	"fmt"
+	"github.com/MishaSytch/linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
 	"golang.org/x/tools/go/analysis"
-	"linter/pkg/config"
-	"linter/pkg/linter/model"
 	"testing"
 )
 

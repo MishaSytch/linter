@@ -1,7 +1,7 @@
 package baseAnalizer
 
 import (
-	"linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/config"
 )
 
 var cfg *config.Config

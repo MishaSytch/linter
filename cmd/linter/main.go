@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/MishaSytch/linter/pkg/linter"
 	"golang.org/x/tools/go/analysis/singlechecker"
-	"linter/pkg/linter"
 )
 
 func main() {

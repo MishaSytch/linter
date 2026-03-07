@@ -1,8 +1,8 @@
 package baseAnalizer
 
 import (
+	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
-	"linter/pkg/linter/model"
 )
 
 type analysisResult struct {

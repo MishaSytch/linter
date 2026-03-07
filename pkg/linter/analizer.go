@@ -1,12 +1,12 @@
 package linter
 
 import (
+	"github.com/MishaSytch/linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/linter/model"
+	"github.com/MishaSytch/linter/pkg/linter/util"
+	"github.com/MishaSytch/linter/pkg/linter/util/baseAnalizer"
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
-	"linter/pkg/config"
-	"linter/pkg/linter/model"
-	"linter/pkg/linter/util"
-	"linter/pkg/linter/util/baseAnalizer"
 )
 
 // Analyzer определяет конфигурацию линтера для использования в основной программе.

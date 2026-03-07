@@ -2,11 +2,11 @@ package baseAnalizer
 
 import (
 	"fmt"
+	"github.com/MishaSytch/linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/linter/model"
+	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
-	"linter/pkg/config"
-	"linter/pkg/linter/model"
-	"linter/pkg/linter/util"
 	"regexp"
 	"strings"
 	"unicode"

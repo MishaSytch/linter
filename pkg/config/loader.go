@@ -1,8 +1,8 @@
 package config
 
 import (
+	"github.com/MishaSytch/linter/pkg/linter/model"
 	"gopkg.in/yaml.v3"
-	"linter/pkg/linter/model"
 	"log/slog"
 	"os"
 	"sync"
