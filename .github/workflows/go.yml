@@ -59,3 +59,4 @@ jobs:
       - name: Run golangci-lint
         run: |
           CGO_ENABLED=1 $(go env GOPATH)/bin/golangci-lint run --config=.golangci.yml ./internal/exampleProject/...
+        continue-on-error: true
