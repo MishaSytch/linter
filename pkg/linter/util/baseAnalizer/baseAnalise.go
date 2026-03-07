@@ -7,6 +7,7 @@ import (
 	"linter/pkg/config"
 	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -49,7 +50,7 @@ func checkFirstLetterCase(pass model.Reporter, arg ast.Expr, msg string) {
 		fixedMsg := string(runes)
 
 		var reportMsg string
-		if cfg.Output.TestConfig {
+		if cfg.Output.TestRun {
 			reportMsg = model.MsgLowerCaseRules
 		} else {
 			reportMsg = fmt.Sprintf("log message should start with a lowercase letter \n\tsuggested: \t%s", fixedMsg)
@@ -95,23 +96,35 @@ func checkTextSyntax(pass model.Reporter, arg ast.Expr, msg string) {
 
 // checkSensitiveData ищет утечки секретов в тексте сообщения
 func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
-	lowerMsg := strings.ToLower(msg)
 	fixedMsg := msg
-	var foundKeywords []string
+	lowerMsg := strings.ToLower(msg)
+	var allFoundIssues []string
 
-	for _, kw := range cfg.SensitiveWords {
+	for _, kw := range cfg.SensitiveRules.SensitiveWords {
 		lowerKw := strings.ToLower(kw)
 		if strings.Contains(lowerMsg, lowerKw) {
-			foundKeywords = append(foundKeywords, kw)
+			allFoundIssues = append(allFoundIssues, kw)
 			mask := strings.Repeat("*", len(kw))
 			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
 		}
 	}
 
-	if len(foundKeywords) > 0 {
+	for _, p := range cfg.SensitiveRules.Patterns {
+		re, err := regexp.Compile(p.Regex)
+		if err != nil {
+			continue
+		}
+
+		if re.MatchString(fixedMsg) {
+			allFoundIssues = append(allFoundIssues, p.Name)
+			fixedMsg = re.ReplaceAllString(fixedMsg, "********")
+		}
+	}
+
+	if len(allFoundIssues) > 0 {
 		var reportMsg string
-		if cfg.Output.TestConfig {
-			reportMsg = fmt.Sprintf(model.MsgSensitiveData, strings.Join(foundKeywords, ", "))
+		if cfg.Output.TestRun {
+			reportMsg = fmt.Sprintf(model.MsgSensitiveData, strings.Join(allFoundIssues, ", "))
 		} else {
 			reportMsg = fmt.Sprintf("log message contains potentially sensitive data \n\tsuggested: \t%s", fixedMsg)
 		}
@@ -166,7 +179,7 @@ func checkSpecialCharsSyntax(pass model.Reporter, arg ast.Expr, errors textError
 		}
 
 		var reportMsg string
-		if cfg.Output.TestConfig {
+		if cfg.Output.TestRun {
 			reportMsg = model.MsgSpecialChars
 		} else {
 			reportMsg = fmt.Sprintf("%s  \n\tsuggested: \t%s", model.MsgSpecialChars, fixedMsg)

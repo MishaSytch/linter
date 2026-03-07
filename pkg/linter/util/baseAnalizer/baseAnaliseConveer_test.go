@@ -45,7 +45,16 @@ func setupBaseTestAggregate() (model.Reporter, *[]string) {
 func TestBaseAnalyzerAggregate(t *testing.T) {
 	mock, reports := setupBaseTestAggregate()
 	m := mock.(*MockReporterAggregate)
-	testCfg := &config.Config{SensitiveWords: []string{"secret"}}
+	testCfg := &config.Config{
+		SensitiveRules: config.SensitiveRules{
+			SensitiveWords: []string{"secret"},
+			Patterns:       []config.SensitivePattern{},
+		},
+		Output: config.OutputConfig{
+			ErrorsAggregate: true,
+			TestRun:         true,
+		},
+	}
 	tests := []struct {
 		name    string
 		msg     string
@@ -169,9 +178,19 @@ func Test_checkOnlyEnglishSyntaxWithBool(t *testing.T) {
 		})
 	}
 }
-
 func Test_applySensitiveFix(t *testing.T) {
-	cfg = &config.Config{SensitiveWords: []string{"password", "token"}}
+	cfg = &config.Config{
+		SensitiveRules: config.SensitiveRules{
+			SensitiveWords: []string{"secret"},
+			Patterns: []config.SensitivePattern{
+				{
+					Name:  "IPv4 Address",
+					Regex: `(?:\d{1,3}\.){3}\d{1,3}`,
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name         string
 		msg          string
@@ -179,10 +198,22 @@ func Test_applySensitiveFix(t *testing.T) {
 		wantFixedMsg string
 	}{
 		{
-			"Leak password",
-			"my password is 123",
+			"Leak secret (Keyword)",
+			"my secret is 123",
 			true,
-			"my ******** is 123",
+			"my ****** is 123",
+		},
+		{
+			"Leak IP (Pattern)",
+			"connecting to 192.168.1.1",
+			true,
+			"connecting to ********",
+		},
+		{
+			"Mixed leak (Keyword and Pattern)",
+			"secret ip is 127.0.0.1",
+			true,
+			"****** ip is ********",
 		},
 		{
 			"Clear text",
@@ -191,17 +222,25 @@ func Test_applySensitiveFix(t *testing.T) {
 			"hello world",
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{fixedMsg: tt.msg}
+			res := &analysisResult{
+				fixedMsg: tt.msg,
+				errors:   []string{},
+			}
+
 			applySensitiveFix(res)
 
 			hasError := len(res.errors) > 0
 			if hasError != tt.wantError {
-				t.Errorf("applySensitiveFix() error = %v, want %v", hasError, tt.wantError)
+				t.Errorf("%s: applySensitiveFix() error = %v, want %v. Errors: %v",
+					tt.name, hasError, tt.wantError, res.errors)
 			}
+
 			if res.fixedMsg != tt.wantFixedMsg {
-				t.Errorf("applySensitiveFix() got %s, want %s", res.fixedMsg, tt.wantFixedMsg)
+				t.Errorf("%s: fixedMsg got %s, want %s",
+					tt.name, res.fixedMsg, tt.wantFixedMsg)
 			}
 		})
 	}
