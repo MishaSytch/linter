@@ -4,12 +4,21 @@ loggers:
   - zap
   - myCustomLogger
 
-sensitive_words:
-  - password
-  - token
-  - api_key
-  - secret
-  - credit_card
+sensitive_rules:
+  patterns:
+    - name: "Карта Мир"
+      regex: '4[0-9]{12}(?:[0-9]{3})?'
+    - name: "GitHub Token"
+      regex: 'ghp_[a-zA-Z0-9]{36}'
+    - name: "Email Address"
+      regex: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+
+  words:
+    - password
+    - token
+    - api_key
+    - secret
+    - credit_card
 
 
 output:

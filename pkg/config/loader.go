@@ -14,30 +14,35 @@ var cfg *Config
 func LoadConfig(path string) *Config {
 	once.Do(func() {
 		cfg = &Config{
-			Loggers:        model.LoggerList,
-			SensitiveWords: model.SensitiveKeywords,
+			Loggers: model.LoggerList,
+			SensitiveRules: SensitiveRules{
+				Patterns: []SensitivePattern{
+					{
+						Name:  "Email Address",
+						Regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+					},
+				},
+				SensitiveWords: model.SensitiveKeywords,
+			},
+
 			Output: OutputConfig{
 				ShowInConsole:   false,
-				ShowSuggestions: false,
+				ShowSuggestions: true,
 				ErrorsAggregate: false,
-				TestConfig:      true,
+				TestRun:         true,
 			},
 		}
 
 		f, err := os.Open(path)
 		if err != nil {
-			slog.Error("could not open config file (using default settings)", "path", path, "error", err)
+			slog.Warn("using default config", "path", path, "reason", "file not found")
 			return
 		}
 		defer f.Close()
 
-		decoder := yaml.NewDecoder(f)
-		err = decoder.Decode(cfg)
-		if err != nil {
-			slog.Error("failed to decode config yaml (using default settings)", "path", path, "error", err)
+		if err := yaml.NewDecoder(f).Decode(cfg); err != nil {
+			slog.Error("failed to decode config", "error", err)
 		}
-		slog.Info("config loaded", "path", path)
 	})
-
 	return cfg
 }
