@@ -1,7 +1,7 @@
 package main
 
 import (
-	"linter/exampleProject/internal"
+	"linter/internal/exampleProject/internal"
 	"log/slog"
 )
 
