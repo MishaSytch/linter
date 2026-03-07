@@ -19,14 +19,13 @@ var Analyzer = &analysis.Analyzer{
 type ArgumentAnalyzer func(pass *analysis.Pass, arg ast.Expr, config *config.Config)
 
 var configPath string
-var cfg *config.Config
 
 func init() {
 	Analyzer.Flags.StringVar(&configPath, "config", "config.yml", "path to config file")
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
-	cfg = config.LoadConfig(configPath)
+	cfg := config.LoadConfig(configPath)
 
 	var checkArg ArgumentAnalyzer = baseAnalizer.BaseAnalyzer
 	for _, file := range pass.Files {
