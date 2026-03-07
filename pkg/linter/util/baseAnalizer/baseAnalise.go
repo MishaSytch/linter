@@ -13,18 +13,15 @@ import (
 
 var cfg *config.Config
 
-// BaseAnalyzer базовый анализатор кода
-func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
+// BaseAnalyzer теперь собирает все правки воедино
+func BaseAnalyzer(pass model.Reporter, arg ast.Expr, config *config.Config) {
 	cfg = config
-
 	var msg string
 
 	if tv, ok := pass.TypesInfo().Types[arg]; ok && tv.Value != nil {
 		msg = strings.Trim(tv.Value.ExactString(), `"`+"`")
-	} else {
-		if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
-			BaseAnalyzer(pass, subCall.Args[0], config)
-		}
+	} else if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
+		BaseAnalyzer(pass, subCall.Args[0], config)
 		return
 	}
 
@@ -32,142 +29,140 @@ func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
 		return
 	}
 
+	res := &analysisResult{
+		originalMsg: msg,
+		fixedMsg:    msg,
+	}
+
 	checkers := []errorsChecker{
-		checkFirstLetterCase,
-		checkTextSyntax,
-		checkSensitiveData,
+		applyFirstLetterFix,
+		applySyntaxFix,
+		applySensitiveFix,
 	}
 
 	for _, checker := range checkers {
-		checker(pass, arg, msg)
+		checker(res)
+	}
+
+	if len(res.errors) > 0 {
+		reportCombined(pass, arg, res)
 	}
 }
 
-// checkFirstLetterCase проверяет, что сообщение начинается со строчной буквы
-func checkFirstLetterCase(pass Reporter, arg ast.Expr, msg string) {
-	runes := []rune(msg)
+func applyFirstLetterFix(res *analysisResult) {
+	runes := []rune(res.fixedMsg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
 		runes[0] = unicode.ToLower(runes[0])
-		fixedMsg := string(runes)
-		reportMsg := fmt.Sprintf("log message should start with a lowercase letter \n\tsuggested: \t%s", fixedMsg)
-
-		pass.Report(analysis.Diagnostic{
-			Pos:     arg.Pos(),
-			Message: reportMsg,
-			SuggestedFixes: []analysis.SuggestedFix{
-				{
-					Message: "Convert first letter to lowercase",
-					TextEdits: []analysis.TextEdit{
-						{
-							Pos:     arg.Pos(),
-							End:     arg.End(),
-							NewText: []byte("\"" + fixedMsg + "\""),
-						},
-					},
-				},
-			},
-		})
+		res.fixedMsg = string(runes)
+		res.errors = append(res.errors, "should start with a lowercase letter")
 	}
 }
 
-// checkTextSyntax проверяет отсутствие кириллицы и спецсимволов
-func checkTextSyntax(pass Reporter, arg ast.Expr, msg string) {
-	errors := make(textErrors)
-	checkers := []textSyntaxChecker{
+func applySyntaxFix(res *analysisResult) {
+	runes := []rune(res.fixedMsg)
+	var cleanedRunes []rune
+
+	reportedErrors := make(textErrors)
+
+	syntaxCheckers := []textSyntaxChecker{
 		checkOnlyEnglishSyntax,
 		checkSpecialCharsSyntax,
 	}
 
-	for _, r := range msg {
-		for _, check := range checkers {
-			check(pass, arg, errors, r)
+	for _, r := range runes {
+		shouldDelete := false
+
+		for _, check := range syntaxCheckers {
+			if check(res, r, reportedErrors) {
+				shouldDelete = true
+			}
 		}
 
-		if len(errors) == len(checkers) {
-			break
+		if shouldDelete {
+			continue
 		}
+
+		cleanedRunes = append(cleanedRunes, r)
 	}
+
+	res.fixedMsg = string(cleanedRunes)
 }
 
-// checkSensitiveData ищет утечки секретов в тексте сообщения
-func checkSensitiveData(pass Reporter, arg ast.Expr, msg string) {
-	lowerMsg := strings.ToLower(msg)
-	fixedMsg := msg
+func applySensitiveFix(res *analysisResult) {
+	tempMsg := res.fixedMsg
+	lowerMsg := strings.ToLower(tempMsg)
 	found := false
 
 	for _, kw := range cfg.SensitiveWords {
 		if strings.Contains(lowerMsg, kw) {
 			mask := strings.Repeat("*", len(kw))
-			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
+			tempMsg = strings.ReplaceAll(tempMsg, kw, mask)
 			found = true
 		}
 	}
 
 	if found {
-		pass.Report(analysis.Diagnostic{
-			Pos:     arg.Pos(),
-			Message: fmt.Sprintf("log message contains potentially sensitive data  \n\tsuggested: \t%s", fixedMsg),
-			SuggestedFixes: []analysis.SuggestedFix{
-				{
-					Message: "Mask sensitive data with asterisks",
-					TextEdits: []analysis.TextEdit{
-						{
-							Pos:     arg.Pos(),
-							End:     arg.End(),
-							NewText: []byte("\"" + fixedMsg + "\""),
-						},
-					},
-				},
-			},
-		})
+		res.fixedMsg = tempMsg
+		res.errors = append(res.errors, "contains potentially sensitive data")
 	}
 }
 
-// checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
-func checkOnlyEnglishSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
-	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
-		pass.Reportf(arg.Pos(), model.MsgEnglish)
-		errors[model.MsgEnglish] = true
-	}
-}
+func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
+	var fullMessage string
 
-// checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII символов
-func checkSpecialCharsSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
-	if errors[model.MsgSpecialChars] {
-		return
+	errorList := "log message issues:\n  - " + strings.Join(res.errors, "\n  - ")
+
+	if cfg.Output.ShowInConsole {
+		fullMessage = fmt.Sprintf("%s\n\tsuggested:\t\"%s\"", errorList, res.fixedMsg)
+	} else {
+		fullMessage = errorList
 	}
 
-	if r <= 127 {
-		return
+	diagnostic := analysis.Diagnostic{
+		Pos:     arg.Pos(),
+		Message: fullMessage,
 	}
 
-	if !unicode.IsLetter(r) {
-		var msg string
-		if lit, ok := arg.(*ast.BasicLit); ok {
-			msg = strings.Trim(lit.Value, "\"`")
-		}
-		fixedMsg := ""
-		for _, runeVal := range msg {
-			if runeVal <= 127 || unicode.IsLetter(runeVal) {
-				fixedMsg += string(runeVal)
-			}
-		}
-		pass.Report(analysis.Diagnostic{
-			Pos:     arg.Pos(),
-			Message: fmt.Sprintf("%s  \n\tsuggested: \t%s", model.MsgSpecialChars, fixedMsg),
-			SuggestedFixes: []analysis.SuggestedFix{
-				{
-					Message: "Remove special characters",
-					TextEdits: []analysis.TextEdit{
-						{
-							Pos:     arg.Pos(),
-							End:     arg.End(),
-							NewText: []byte("\"" + fixedMsg + "\""),
-						},
+	if cfg.Output.ShowSuggestions {
+		diagnostic.SuggestedFixes = []analysis.SuggestedFix{
+			{
+				Message: "Apply all fixes",
+				TextEdits: []analysis.TextEdit{
+					{
+						Pos:     arg.Pos(),
+						End:     arg.End(),
+						NewText: []byte("\"" + res.fixedMsg + "\""),
 					},
 				},
 			},
-		})
-		errors[model.MsgSpecialChars] = true
+		}
 	}
+
+	pass.Report(diagnostic)
+}
+
+func checkOnlyEnglishSyntax(res *analysisResult, r rune, reported textErrors) bool {
+	isNonLatinLetter := unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z')
+
+	if isNonLatinLetter {
+		if !reported[model.MsgEnglish] {
+			res.errors = append(res.errors, model.MsgEnglish)
+			reported[model.MsgEnglish] = true
+		}
+		return true
+	}
+	return false
+}
+
+func checkSpecialCharsSyntax(res *analysisResult, r rune, reported textErrors) bool {
+	isSpecial := r > 127 && !unicode.IsLetter(r)
+
+	if isSpecial {
+		if !reported[model.MsgSpecialChars] {
+			res.errors = append(res.errors, model.MsgSpecialChars)
+			reported[model.MsgSpecialChars] = true
+		}
+		return true
+	}
+	return false
 }
