@@ -1,7 +1,9 @@
 package baseAnalizer
 
 import (
+	"fmt"
 	"go/ast"
+	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
 	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
@@ -45,7 +47,26 @@ func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
 func checkFirstLetterCase(pass Reporter, arg ast.Expr, msg string) {
 	runes := []rune(msg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
-		pass.Reportf(arg.Pos(), model.MsgLowerCaseRules)
+		runes[0] = unicode.ToLower(runes[0])
+		fixedMsg := string(runes)
+		reportMsg := fmt.Sprintf("log message should start with a lowercase letter \n\tsuggested: \t%s", fixedMsg)
+
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: reportMsg,
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Convert first letter to lowercase",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 	}
 }
 
@@ -71,11 +92,34 @@ func checkTextSyntax(pass Reporter, arg ast.Expr, msg string) {
 // checkSensitiveData ищет утечки секретов в тексте сообщения
 func checkSensitiveData(pass Reporter, arg ast.Expr, msg string) {
 	lowerMsg := strings.ToLower(msg)
+	fixedMsg := msg
+	found := false
+
 	for _, kw := range cfg.SensitiveWords {
 		if strings.Contains(lowerMsg, kw) {
-			pass.Reportf(arg.Pos(), model.MsgSensitiveData, kw)
-			break
+			mask := strings.Repeat("*", len(kw))
+			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
+			found = true
 		}
+	}
+
+	if found {
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: fmt.Sprintf("log message contains potentially sensitive data  \n\tsuggested: \t%s", fixedMsg),
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Mask sensitive data with asterisks",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 	}
 }
 
@@ -92,12 +136,38 @@ func checkSpecialCharsSyntax(pass Reporter, arg ast.Expr, errors textErrors, r r
 	if errors[model.MsgSpecialChars] {
 		return
 	}
+
 	if r <= 127 {
 		return
 	}
 
 	if !unicode.IsLetter(r) {
-		pass.Reportf(arg.Pos(), model.MsgSpecialChars)
+		var msg string
+		if lit, ok := arg.(*ast.BasicLit); ok {
+			msg = strings.Trim(lit.Value, "\"`")
+		}
+		fixedMsg := ""
+		for _, runeVal := range msg {
+			if runeVal <= 127 || unicode.IsLetter(runeVal) {
+				fixedMsg += string(runeVal)
+			}
+		}
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: fmt.Sprintf("%s  \n\tsuggested: \t%s", model.MsgSpecialChars, fixedMsg),
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Remove special characters",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 		errors[model.MsgSpecialChars] = true
 	}
 }
