@@ -27,4 +27,17 @@ jobs:
 
       - name: Run Custom Log Linter
         run: go run ./cmd/linter/main.go ./...
-        
+
+      - name: Run Tests with Coverage
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Check Coverage Threshold
+        run: |
+          total_cov=$(go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+')
+          echo "Total coverage: $total_cov%"
+          is_enough=$(echo "$total_cov >= 80.0" | bc -l)
+          
+          if [ "$is_enough" -ne 1 ]; then
+            echo "Error: Coverage is too low ($total_cov%). Expected at least 80%."
+            exit 1
+          fi
