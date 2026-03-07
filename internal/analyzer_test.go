@@ -1,8 +1,8 @@
 package internal
 
 import (
+	"github.com/MishaSytch/linter/pkg/linter"
 	"golang.org/x/tools/go/analysis/analysistest"
-	"linter/pkg/linter"
 	"testing"
 )
 

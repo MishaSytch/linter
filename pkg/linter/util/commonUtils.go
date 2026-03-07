@@ -1,8 +1,8 @@
 package util
 
 import (
+	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
-	"linter/pkg/linter/model"
 )
 
 // IsFmtSprintf проверяет, является ли выражение вызовом функции fmt.Sprintf()
