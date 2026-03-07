@@ -6,6 +6,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
 	"testing"
 )
@@ -19,6 +20,10 @@ type MockReporter struct {
 func (m *MockReporter) Reportf(pos token.Pos, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	*m.reports = append(*m.reports, msg)
+}
+
+func (m *MockReporter) Report(d analysis.Diagnostic) {
+	*m.reports = append(*m.reports, d.Message)
 }
 
 func (m *MockReporter) TypesInfo() *types.Info {

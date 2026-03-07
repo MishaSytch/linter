@@ -13,6 +13,9 @@ type Reporter interface {
 	// Reportf регистрирует предупреждение в месте pos с форматированным сообщением
 	Reportf(pos token.Pos, format string, args ...interface{})
 
+	// Report регистрирует предупреждение в месте pos
+	Report(d analysis.Diagnostic)
+
 	// TypesInfo возвращает информацию о типах узлов
 	TypesInfo() *types.Info
 }
@@ -22,9 +25,15 @@ type PassWrapper struct {
 	*analysis.Pass
 }
 
+func (w PassWrapper) Report(d analysis.Diagnostic) {
+	w.Pass.Report(d)
+}
+
 func (w PassWrapper) TypesInfo() *types.Info {
 	return w.Pass.TypesInfo
 }
+
+var _ Reporter = (*PassWrapper)(nil)
 
 type errorsChecker func(pass Reporter, arg ast.Expr, msg string)
 type textErrors map[string]bool
