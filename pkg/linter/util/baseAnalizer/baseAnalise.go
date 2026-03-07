@@ -2,7 +2,6 @@ package baseAnalizer
 
 import (
 	"go/ast"
-	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
 	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
@@ -13,12 +12,12 @@ import (
 var cfg *config.Config
 
 // BaseAnalyzer базовый анализатор кода
-func BaseAnalyzer(pass *analysis.Pass, arg ast.Expr, config *config.Config) {
+func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
 	cfg = config
 
 	var msg string
 
-	if tv, ok := pass.TypesInfo.Types[arg]; ok && tv.Value != nil {
+	if tv, ok := pass.TypesInfo().Types[arg]; ok && tv.Value != nil {
 		msg = strings.Trim(tv.Value.ExactString(), `"`+"`")
 	} else {
 		if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
@@ -43,7 +42,7 @@ func BaseAnalyzer(pass *analysis.Pass, arg ast.Expr, config *config.Config) {
 }
 
 // checkFirstLetterCase проверяет, что сообщение начинается со строчной буквы
-func checkFirstLetterCase(pass *analysis.Pass, arg ast.Expr, msg string) {
+func checkFirstLetterCase(pass Reporter, arg ast.Expr, msg string) {
 	runes := []rune(msg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
 		pass.Reportf(arg.Pos(), model.MsgLowerCaseRules)
@@ -51,7 +50,7 @@ func checkFirstLetterCase(pass *analysis.Pass, arg ast.Expr, msg string) {
 }
 
 // checkTextSyntax проверяет отсутствие кириллицы и спецсимволов
-func checkTextSyntax(pass *analysis.Pass, arg ast.Expr, msg string) {
+func checkTextSyntax(pass Reporter, arg ast.Expr, msg string) {
 	errors := make(textErrors)
 	checkers := []textSyntaxChecker{
 		checkOnlyEnglishSyntax,
@@ -70,7 +69,7 @@ func checkTextSyntax(pass *analysis.Pass, arg ast.Expr, msg string) {
 }
 
 // checkSensitiveData ищет утечки секретов в тексте сообщения
-func checkSensitiveData(pass *analysis.Pass, arg ast.Expr, msg string) {
+func checkSensitiveData(pass Reporter, arg ast.Expr, msg string) {
 	lowerMsg := strings.ToLower(msg)
 	for _, kw := range cfg.SensitiveWords {
 		if strings.Contains(lowerMsg, kw) {
@@ -81,7 +80,7 @@ func checkSensitiveData(pass *analysis.Pass, arg ast.Expr, msg string) {
 }
 
 // checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
-func checkOnlyEnglishSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune) {
+func checkOnlyEnglishSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
 	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
 		pass.Reportf(arg.Pos(), model.MsgEnglish)
 		errors[model.MsgEnglish] = true
@@ -89,7 +88,7 @@ func checkOnlyEnglishSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors
 }
 
 // checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII символов
-func checkSpecialCharsSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune) {
+func checkSpecialCharsSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
 	if errors[model.MsgSpecialChars] {
 		return
 	}
