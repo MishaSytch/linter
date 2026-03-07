@@ -61,7 +61,7 @@ func checkTextSyntax(pass *analysis.Pass, arg ast.Expr, msg string) {
 	}
 }
 
-// checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит.
+// checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
 func checkOnlyEnglishSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune) {
 	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
 		pass.Reportf(arg.Pos(), model.MsgEnglish)
@@ -69,9 +69,16 @@ func checkOnlyEnglishSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors
 	}
 }
 
-// checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII графики.
+// checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII символов
 func checkSpecialCharsSyntax(pass *analysis.Pass, arg ast.Expr, errors textErrors, r rune) {
-	if !errors[model.MsgSpecialChars] && (unicode.IsSymbol(r) || unicode.IsGraphic(r)) && r > 127 {
+	if errors[model.MsgSpecialChars] {
+		return
+	}
+	if r <= 127 {
+		return
+	}
+
+	if !unicode.IsLetter(r) {
 		pass.Reportf(arg.Pos(), model.MsgSpecialChars)
 		errors[model.MsgSpecialChars] = true
 	}
