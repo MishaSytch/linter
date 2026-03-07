@@ -86,59 +86,90 @@ func TestBaseAnalyzer(t *testing.T) {
 	}
 }
 
-func Test_applySyntaxFix(t *testing.T) {
+func Test_checkTextSyntax(t *testing.T) {
+	pass, reports := setupBaseTest()
 	tests := []struct {
 		name            string
 		msg             string
 		wantErrorsCount int
-		wantFixedMsg    string
 	}{
 		{
 			name:            "Clean English text",
 			msg:             "valid message",
 			wantErrorsCount: 0,
-			wantFixedMsg:    "valid message",
 		},
 		{
 			name:            "Only Cyrillic",
 			msg:             "ошибка",
 			wantErrorsCount: 1,
-			wantFixedMsg:    "",
 		},
 		{
 			name:            "Cyrillic and Emoji",
 			msg:             "ошибка 🫡",
 			wantErrorsCount: 2,
-			wantFixedMsg:    " ",
 		},
 		{
 			name:            "Multiple emojis",
 			msg:             "🫡🚀",
 			wantErrorsCount: 1,
-			wantFixedMsg:    "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{fixedMsg: tt.msg}
-			applySyntaxFix(res)
+			*reports = nil
+			checkTextSyntax(pass, &ast.BasicLit{}, tt.msg)
 
-			if len(res.errors) != tt.wantErrorsCount {
-				t.Errorf("applySyntaxFix() '%s' got %d errors, want %d", tt.msg, len(res.errors), tt.wantErrorsCount)
+			if len(*reports) != tt.wantErrorsCount {
+				t.Errorf("checkTextSyntax() '%s' got %d errors, want %d. Errors: %v",
+					tt.msg, len(*reports), tt.wantErrorsCount, *reports)
 			}
-			if res.fixedMsg != tt.wantFixedMsg {
-				t.Errorf("applySyntaxFix() '%s' fixedMsg = '%s', want '%s'", tt.msg, res.fixedMsg, tt.wantFixedMsg)
+		})
+	}
+}
+
+func Test_checkFirstLetterCase(t *testing.T) {
+	pass, reports := setupBaseTest()
+	tests := []struct {
+		name    string
+		msg     string
+		wantErr bool
+	}{
+		{
+			"Valid lowercase",
+			"correct message",
+			false,
+		},
+		{
+			"Invalid uppercase",
+			"Bad message",
+			true,
+		},
+		{
+			"Non-letter start",
+			"123 message",
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			*reports = nil
+			checkFirstLetterCase(pass, &ast.BasicLit{}, tt.msg)
+
+			hasError := len(*reports) > 0
+			if hasError != tt.wantErr {
+				t.Errorf("checkFirstLetterCase() error = %v, wantErr %v", hasError, tt.wantErr)
 			}
 		})
 	}
 }
 
 func Test_checkOnlyEnglishSyntax(t *testing.T) {
+	pass, reports := setupBaseTest()
 	tests := []struct {
-		name         string
-		r            rune
-		shouldDelete bool
+		name    string
+		r       rune
+		wantErr bool
 	}{
 		{
 			"Latin",
@@ -158,50 +189,92 @@ func Test_checkOnlyEnglishSyntax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{}
-			reported := make(textErrors)
+			*reports = nil
+			errors := make(textErrors)
+			checkOnlyEnglishSyntax(pass, &ast.BasicLit{}, errors, tt.r)
 
-			gotDelete := checkOnlyEnglishSyntax(res, tt.r, reported)
-
-			if gotDelete != tt.shouldDelete {
-				t.Errorf("checkOnlyEnglishSyntax() rune %c, gotDelete = %v, want %v", tt.r, gotDelete, tt.shouldDelete)
+			hasError := len(*reports) > 0
+			if hasError != tt.wantErr {
+				t.Errorf("checkOnlyEnglishSyntax() rune %c, error = %v", tt.r, hasError)
 			}
 		})
 	}
 }
 
-func Test_applySensitiveFix(t *testing.T) {
-	cfg = &config.Config{SensitiveWords: []string{"password", "token"}}
+func Test_checkSpecialCharsSyntax(t *testing.T) {
+	pass, reports := setupBaseTest()
+
 	tests := []struct {
-		name         string
-		msg          string
-		wantError    bool
-		wantFixedMsg string
+		name    string
+		r       rune
+		wantErr bool
 	}{
 		{
-			"Leak password",
-			"my password is 123",
-			true,
-			"my ******** is 123",
+			"Standard ASCII",
+			'!',
+			false,
 		},
 		{
-			"Clear text",
-			"hello world",
+			"Emoji",
+			'🫡',
+			true,
+		},
+		{
+			"Math symbol",
+			'∑',
+			true,
+		},
+		{
+			"Spanish symbol",
+			'ñ',
 			false,
-			"hello world",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{fixedMsg: tt.msg}
-			applySensitiveFix(res)
+			*reports = nil
+			errors := make(textErrors)
+			checkSpecialCharsSyntax(pass, &ast.BasicLit{}, errors, tt.r)
 
-			hasError := len(res.errors) > 0
-			if hasError != tt.wantError {
-				t.Errorf("applySensitiveFix() error = %v, want %v", hasError, tt.wantError)
+			hasError := len(*reports) > 0
+			if hasError != tt.wantErr {
+				t.Errorf("checkSpecialCharsSyntax() rune %c, error = %v", tt.r, hasError)
 			}
-			if res.fixedMsg != tt.wantFixedMsg {
-				t.Errorf("applySensitiveFix() got %s, want %s", res.fixedMsg, tt.wantFixedMsg)
+		})
+	}
+}
+
+func Test_checkSensitiveData(t *testing.T) {
+	pass, reports := setupBaseTest()
+	cfg = &config.Config{SensitiveWords: []string{"password", "token"}}
+	tests := []struct {
+		name    string
+		msg     string
+		wantErr bool
+	}{
+		{
+			"Clear text",
+			"hello world",
+			false,
+		},
+		{
+			"Leak password",
+			"my password is 123",
+			true,
+		},
+		{
+			"Leak token",
+			"SECRET_TOKEN_HERE",
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			*reports = nil
+			checkSensitiveData(pass, &ast.BasicLit{}, tt.msg)
+
+			if (len(*reports) > 0) != tt.wantErr {
+				t.Errorf("checkSensitiveData() '%s' error = %v", tt.msg, len(*reports) > 0)
 			}
 		})
 	}
