@@ -16,7 +16,7 @@ var Analyzer = &analysis.Analyzer{
 }
 
 // ArgumentAnalyzer функциональный тип для анализа кода
-type ArgumentAnalyzer func(pass *analysis.Pass, arg ast.Expr, config *config.Config)
+type ArgumentAnalyzer func(pass baseAnalizer.Reporter, arg ast.Expr, config *config.Config)
 
 var configPath string
 
@@ -27,7 +27,10 @@ func init() {
 func run(pass *analysis.Pass) (interface{}, error) {
 	cfg := config.LoadConfig(configPath)
 
+	wrapper := baseAnalizer.PassWrapper{Pass: pass}
+
 	var checkArg ArgumentAnalyzer = baseAnalizer.BaseAnalyzer
+
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -36,7 +39,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			}
 
 			for _, arg := range call.Args {
-				checkArg(pass, arg, cfg)
+				checkArg(wrapper, arg, cfg)
 			}
 			return true
 		})
