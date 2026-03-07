@@ -6,8 +6,8 @@ loggers:
 
 sensitive_rules:
   patterns:
-    - name: "Карта Мир"
-      regex: '4[0-9]{12}(?:[0-9]{3})?'
+    - name: "Any Card"
+      regex: '[0-9]{13,16}'
     - name: "GitHub Token"
       regex: 'ghp_[a-zA-Z0-9]{36}'
     - name: "Email Address"

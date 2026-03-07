@@ -20,5 +20,6 @@ func Run() {
 		fmt.Fprintf(w, "Hello, check your logs!")
 	})
 
-	log.Fatal("сервер упал")
+	log.Println("сервер упал")
+	log.Fatal("take my money credit card: 423412315151234")
 }
