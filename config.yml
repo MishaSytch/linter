@@ -1,0 +1,12 @@
+loggers:
+  - log
+  - slog
+  - zap
+  - myCustomLogger
+
+sensitive_words:
+  - password
+  - token
+  - api_key
+  - secret
+  - credit_card
