@@ -1,0 +1,13 @@
+#version: 2
+
+linters-settings:
+  custom:
+    loglint:
+      path: ./loglint.so
+      description: Линтер для анализа логов (English, lowercase, sensitive data)
+      original-url: github.com/MishaSytch/linter
+
+linters:
+  disable-all: true
+  enable:
+    - loglint
