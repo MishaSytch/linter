@@ -1,7 +1,9 @@
 package baseAnalizer
 
 import (
+	"fmt"
 	"go/ast"
+	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
 	"linter/pkg/linter/model"
 	"linter/pkg/linter/util"
@@ -9,10 +11,8 @@ import (
 	"unicode"
 )
 
-var cfg *config.Config
-
 // BaseAnalyzer базовый анализатор кода
-func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
+func BaseAnalyzer(pass model.Reporter, arg ast.Expr, config *config.Config) {
 	cfg = config
 
 	var msg string
@@ -42,15 +42,40 @@ func BaseAnalyzer(pass Reporter, arg ast.Expr, config *config.Config) {
 }
 
 // checkFirstLetterCase проверяет, что сообщение начинается со строчной буквы
-func checkFirstLetterCase(pass Reporter, arg ast.Expr, msg string) {
+func checkFirstLetterCase(pass model.Reporter, arg ast.Expr, msg string) {
 	runes := []rune(msg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
-		pass.Reportf(arg.Pos(), model.MsgLowerCaseRules)
+		runes[0] = unicode.ToLower(runes[0])
+		fixedMsg := string(runes)
+
+		var reportMsg string
+		if cfg.Output.TestConfig {
+			reportMsg = model.MsgLowerCaseRules
+		} else {
+			reportMsg = fmt.Sprintf("log message should start with a lowercase letter \n\tsuggested: \t%s", fixedMsg)
+		}
+
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: reportMsg,
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Convert first letter to lowercase",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 	}
 }
 
 // checkTextSyntax проверяет отсутствие кириллицы и спецсимволов
-func checkTextSyntax(pass Reporter, arg ast.Expr, msg string) {
+func checkTextSyntax(pass model.Reporter, arg ast.Expr, msg string) {
 	errors := make(textErrors)
 	checkers := []textSyntaxChecker{
 		checkOnlyEnglishSyntax,
@@ -69,18 +94,49 @@ func checkTextSyntax(pass Reporter, arg ast.Expr, msg string) {
 }
 
 // checkSensitiveData ищет утечки секретов в тексте сообщения
-func checkSensitiveData(pass Reporter, arg ast.Expr, msg string) {
+func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
 	lowerMsg := strings.ToLower(msg)
+	fixedMsg := msg
+	var foundKeywords []string
+
 	for _, kw := range cfg.SensitiveWords {
-		if strings.Contains(lowerMsg, kw) {
-			pass.Reportf(arg.Pos(), model.MsgSensitiveData, kw)
-			break
+		lowerKw := strings.ToLower(kw)
+		if strings.Contains(lowerMsg, lowerKw) {
+			foundKeywords = append(foundKeywords, kw)
+			mask := strings.Repeat("*", len(kw))
+			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
 		}
+	}
+
+	if len(foundKeywords) > 0 {
+		var reportMsg string
+		if cfg.Output.TestConfig {
+			reportMsg = fmt.Sprintf(model.MsgSensitiveData, strings.Join(foundKeywords, ", "))
+		} else {
+			reportMsg = fmt.Sprintf("log message contains potentially sensitive data \n\tsuggested: \t%s", fixedMsg)
+		}
+
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: reportMsg,
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Mask sensitive data with asterisks",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 	}
 }
 
 // checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
-func checkOnlyEnglishSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
+func checkOnlyEnglishSyntax(pass model.Reporter, arg ast.Expr, errors textErrors, r rune) {
 	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
 		pass.Reportf(arg.Pos(), model.MsgEnglish)
 		errors[model.MsgEnglish] = true
@@ -88,16 +144,50 @@ func checkOnlyEnglishSyntax(pass Reporter, arg ast.Expr, errors textErrors, r ru
 }
 
 // checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII символов
-func checkSpecialCharsSyntax(pass Reporter, arg ast.Expr, errors textErrors, r rune) {
+func checkSpecialCharsSyntax(pass model.Reporter, arg ast.Expr, errors textErrors, r rune) {
 	if errors[model.MsgSpecialChars] {
 		return
 	}
+
 	if r <= 127 {
 		return
 	}
 
 	if !unicode.IsLetter(r) {
-		pass.Reportf(arg.Pos(), model.MsgSpecialChars)
+		var msg string
+		if lit, ok := arg.(*ast.BasicLit); ok {
+			msg = strings.Trim(lit.Value, "\"`")
+		}
+		fixedMsg := ""
+		for _, runeVal := range msg {
+			if runeVal <= 127 || unicode.IsLetter(runeVal) {
+				fixedMsg += string(runeVal)
+			}
+		}
+
+		var reportMsg string
+		if cfg.Output.TestConfig {
+			reportMsg = model.MsgSpecialChars
+		} else {
+			reportMsg = fmt.Sprintf("%s  \n\tsuggested: \t%s", model.MsgSpecialChars, fixedMsg)
+		}
+
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: reportMsg,
+			SuggestedFixes: []analysis.SuggestedFix{
+				{
+					Message: "Remove special characters",
+					TextEdits: []analysis.TextEdit{
+						{
+							Pos:     arg.Pos(),
+							End:     arg.End(),
+							NewText: []byte("\"" + fixedMsg + "\""),
+						},
+					},
+				},
+			},
+		})
 		errors[model.MsgSpecialChars] = true
 	}
 }

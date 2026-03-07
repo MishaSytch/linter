@@ -6,7 +6,9 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"golang.org/x/tools/go/analysis"
 	"linter/pkg/config"
+	"linter/pkg/linter/model"
 	"testing"
 )
 
@@ -21,11 +23,15 @@ func (m *MockReporter) Reportf(pos token.Pos, format string, args ...interface{}
 	*m.reports = append(*m.reports, msg)
 }
 
+func (m *MockReporter) Report(d analysis.Diagnostic) {
+	*m.reports = append(*m.reports, d.Message)
+}
+
 func (m *MockReporter) TypesInfo() *types.Info {
 	return m.typesInfo
 }
 
-func setupBaseTest() (Reporter, *[]string) {
+func setupBaseTest() (model.Reporter, *[]string) {
 	reports := &[]string{}
 	mock := &MockReporter{
 		reports: reports,
