@@ -43,12 +43,11 @@ jobs:
             exit 1
           fi
 
-      - name: Build & Install Tools
+      - name: Build and Install Everything
         run: |
           CGO_ENABLED=1 go build -mod=vendor -buildmode=plugin -o loglint.so ./plugin/main.go
-          CGO_ENABLED=1 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
+          CGO_ENABLED=1 go install -mod=vendor github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
 
       - name: Run golangci-lint
         run: |
           CGO_ENABLED=1 $(go env GOPATH)/bin/golangci-lint run --config=.golangci.yml ./internal/exampleProject/...
-        continue-on-error: true
