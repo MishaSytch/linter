@@ -7,7 +7,6 @@ import (
 	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
-	"regexp"
 	"strings"
 	"unicode"
 )
@@ -100,26 +99,9 @@ func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
 	lowerMsg := strings.ToLower(msg)
 	var allFoundIssues []string
 
-	for _, kw := range cfg.SensitiveRules.SensitiveWords {
-		lowerKw := strings.ToLower(kw)
-		if strings.Contains(lowerMsg, lowerKw) {
-			allFoundIssues = append(allFoundIssues, kw)
-			mask := strings.Repeat("*", len(kw))
-			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
-		}
-	}
-
-	for _, p := range cfg.SensitiveRules.Patterns {
-		re, err := regexp.Compile(p.Regex)
-		if err != nil {
-			continue
-		}
-
-		if re.MatchString(fixedMsg) {
-			allFoundIssues = append(allFoundIssues, p.Name)
-			fixedMsg = re.ReplaceAllString(fixedMsg, "********")
-		}
-	}
+	var newFoundIssues []string
+	fixedMsg, newFoundIssues = containSensitiveData(lowerMsg)
+	allFoundIssues = append(allFoundIssues, newFoundIssues...)
 
 	if len(allFoundIssues) > 0 {
 		var reportMsg string
@@ -150,7 +132,7 @@ func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
 
 // checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
 func checkOnlyEnglishSyntax(pass model.Reporter, arg ast.Expr, errors textErrors, r rune) {
-	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
+	if !errors[model.MsgEnglish] && isNonEnglish(r) {
 		pass.Reportf(arg.Pos(), model.MsgEnglish)
 		errors[model.MsgEnglish] = true
 	}
@@ -173,7 +155,7 @@ func checkSpecialCharsSyntax(pass model.Reporter, arg ast.Expr, errors textError
 		}
 		fixedMsg := ""
 		for _, runeVal := range msg {
-			if runeVal <= 127 || unicode.IsLetter(runeVal) {
+			if !isSpecialChars(runeVal) {
 				fixedMsg += string(runeVal)
 			}
 		}

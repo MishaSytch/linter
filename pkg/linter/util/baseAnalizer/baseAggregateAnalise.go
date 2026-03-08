@@ -7,7 +7,6 @@ import (
 	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
-	"regexp"
 	"strings"
 	"unicode"
 )
@@ -88,33 +87,16 @@ func applySyntaxFix(res *analysisResult) {
 }
 
 func applySensitiveFix(res *analysisResult) {
-	tempMsg := res.fixedMsg
-	lowerMsg := strings.ToLower(tempMsg)
+	fixedMsg := res.fixedMsg
+	lowerMsg := strings.ToLower(fixedMsg)
 	var foundIssues []string
 
-	for _, kw := range cfg.SensitiveRules.SensitiveWords {
-		lowerKw := strings.ToLower(kw)
-		if strings.Contains(lowerMsg, lowerKw) {
-			foundIssues = append(foundIssues, kw)
-			mask := strings.Repeat("*", len(kw))
-			tempMsg = strings.ReplaceAll(tempMsg, kw, mask)
-		}
-	}
-
-	for _, p := range cfg.SensitiveRules.Patterns {
-		re, err := regexp.Compile(p.Regex)
-		if err != nil {
-			continue
-		}
-
-		if re.MatchString(tempMsg) {
-			foundIssues = append(foundIssues, p.Name)
-			tempMsg = re.ReplaceAllString(tempMsg, "********")
-		}
-	}
+	var newFoundIssues []string
+	fixedMsg, newFoundIssues = containSensitiveData(lowerMsg)
+	foundIssues = append(foundIssues, newFoundIssues...)
 
 	if len(foundIssues) > 0 {
-		res.fixedMsg = tempMsg
+		res.fixedMsg = fixedMsg
 
 		msg := fmt.Sprintf("log message contains potentially sensitive data: %s",
 			strings.Join(foundIssues, ", "))
@@ -181,7 +163,7 @@ func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
 // checkOnlyEnglishSyntaxWithBool проверяет, является ли символ буквой и входит ли он в латинский алфавит
 // и возвращает требование к исправлению
 func checkOnlyEnglishSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
-	isNonLatinLetter := unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z')
+	isNonLatinLetter := isNonEnglish(r)
 
 	if isNonLatinLetter {
 		if !reported[model.MsgEnglish] {
@@ -196,7 +178,7 @@ func checkOnlyEnglishSyntaxWithBool(res *analysisResult, r rune, reported textEr
 // checkSpecialCharsSyntaxWithBool проверяет наличие спецсимволов и не-ASCII символов
 // и возвращает требование к исправлению
 func checkSpecialCharsSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
-	isSpecial := r > 127 && !unicode.IsLetter(r)
+	isSpecial := isSpecialChars(r)
 
 	if isSpecial {
 		if !reported[model.MsgSpecialChars] {
