@@ -1,4 +1,3 @@
-/internal/testdata/src/go.uber.org/
 vendor
 .idea
 *.so
