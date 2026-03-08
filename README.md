@@ -200,3 +200,29 @@ go run ./cmd/linter/main.go ./internal/exampleProject/...
         suggested:      "     !"
 exit status 3
 ```
+
+
+## Тестирование
+
+Для тестирования необходимо добавить зависимости zap в `./internal/testdata/src`, чтобы `analyzer_test.go` знал об его 
+существовании (он запускается в изолированном окружении). Для этого создайте `vendor` и переместите зависимости туда:
+
+```bash
+# 1. Создаем вендор
+go mod vendor
+# или, если есть go.work, где подключен demo проект ./internal/exampleProject
+go work vendor
+
+ # 2. Создаем структуру папок
+ mkdir -p internal/testdata/src/go.uber.org/zap
+ mkdir -p internal/testdata/src/go.uber.org/multierr
+
+ # 3. Копируем исходники
+ cp -r vendor/go.uber.org/zap/. internal/testdata/src/go.uber.org/zap/
+ cp -r vendor/go.uber.org/multierr/. internal/testdata/src/go.uber.org/multierr/
+```
+
+Теперь можно запустить тесты:
+```bash
+ go test -v ./...
+```
