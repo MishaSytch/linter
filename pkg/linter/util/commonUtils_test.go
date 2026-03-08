@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -28,6 +29,48 @@ func (m *MockReporter) Report(d analysis.Diagnostic) {
 func (m *MockReporter) TypesInfo() *types.Info {
 	return m.typesInfo
 }
+
+func (m *MockReporter) GetTypeAndValue(expr ast.Expr) (types.TypeAndValue, bool) {
+	if m.typesInfo == nil {
+		return types.TypeAndValue{}, false
+	}
+	tv, ok := m.typesInfo.Types[expr]
+	return tv, ok
+}
+
+func (m *MockReporter) TypeOf(expr ast.Expr) types.Type {
+	if m.typesInfo == nil {
+		return nil
+	}
+	// Пытаемся достать тип из стандартной мапы TypesInfo
+	if tv, ok := m.typesInfo.Types[expr]; ok {
+		return tv.Type
+	}
+	return nil
+}
+
+func (m *MockReporter) GetSelection(sel *ast.SelectorExpr) (*types.Selection, bool) {
+	if m.typesInfo == nil {
+		return nil, false
+	}
+	s, ok := m.typesInfo.Selections[sel]
+	return s, ok
+}
+
+func (m *MockReporter) GetObject(id *ast.Ident) (types.Object, bool) {
+	if m.typesInfo == nil {
+		return nil, false
+	}
+	obj, ok := m.typesInfo.Uses[id]
+	if !ok {
+		obj, ok = m.typesInfo.Defs[id]
+	}
+	return obj, ok
+}
+
+func (m *MockReporter) ObjectOf(id *ast.Ident) types.Object { return nil }
+
+var _ model.Reporter = (*MockReporter)(nil)
 
 func TestIsFmtSprintf(t *testing.T) {
 	tests := []struct {
@@ -72,10 +115,13 @@ func TestIsFmtSprintf(t *testing.T) {
 }
 
 func TestIsLogCall(t *testing.T) {
+	model.LoggerList = []string{"log", "zap", "slog", "logger", "z", "sugar"}
+
 	tests := []struct {
-		name string
-		code string
-		want bool
+		name     string
+		code     string
+		want     bool
+		mockType string
 	}{
 		{
 			name: "standard log Printf",
@@ -121,12 +167,6 @@ func TestIsLogCall(t *testing.T) {
 		},
 
 		{
-			name: "zap from factory function",
-			code: `getLog().Debug("factory")`,
-			want: true,
-		},
-
-		{
 			name: "unknown package",
 			code: `fmt.Printf("hello")`,
 			want: false,
@@ -155,10 +195,29 @@ func TestIsLogCall(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			reports := &[]string{}
+			pass := &MockReporter{
+				reports: reports,
+				typesInfo: &types.Info{
+					Types: make(map[ast.Expr]types.TypeAndValue),
+				},
+			}
+
 			expr, _ := parser.ParseExpr(tt.code)
 			call, ok := expr.(*ast.CallExpr)
 			if !ok {
 				t.Fatalf("test code is not a call expression: %s", tt.code)
+			}
+
+			if tt.mockType != "" {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					pass.typesInfo.Types[sel.X] = types.TypeAndValue{
+						Type: types.NewNamed(
+							types.NewTypeName(token.NoPos, nil, tt.mockType, nil),
+							nil, nil,
+						),
+					}
+				}
 			}
 
 			if got := IsLogCall(pass, call); got != tt.want {

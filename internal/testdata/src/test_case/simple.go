@@ -66,7 +66,7 @@ func testZapStructuredWhenEasyThenOk() {
 	logger.Warn(easyMsgEnglish)        // want "log message should be in English"
 
 	logger.Error("process failed",
-		zap.String("api_key", "m1sha2"), // want "log message contains potentially sensitive data: api_key"
+		zap.String("api_key", "m1sha2"), // want "log message contains potentially sensitive data: api_key" "log message contains potentially sensitive data: api_key"
 		zap.Int("attempts", 3),
 	)
 

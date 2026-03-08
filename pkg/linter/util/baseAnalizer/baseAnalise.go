@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/MishaSytch/linter/pkg/config"
 	"github.com/MishaSytch/linter/pkg/linter/model"
-	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
 	"go/token"
 	"golang.org/x/tools/go/analysis"
@@ -21,6 +20,10 @@ type BaseAnalyzer struct {
 var _ model.FunctionalAnalyzer = (*BaseAnalyzer)(nil)
 
 func (a *BaseAnalyzer) Analyze(arg ast.Expr) {
+	if arg == nil {
+		return
+	}
+
 	if tv, ok := a.Pass.GetTypeAndValue(arg); ok && tv.Value != nil {
 		msg := strings.Trim(tv.Value.ExactString(), `"`+"`")
 		if msg != "" {
@@ -29,16 +32,55 @@ func (a *BaseAnalyzer) Analyze(arg ast.Expr) {
 		return
 	}
 
-	if call, ok := arg.(*ast.CallExpr); ok {
-		if util.IsFmtSprintf(call) && len(call.Args) > 0 {
-			a.Analyze(call.Args[0])
-			return
+	switch expr := arg.(type) {
+	case *ast.BinaryExpr:
+		if expr.Op == token.ADD {
+			a.Analyze(expr.X)
+			a.Analyze(expr.Y)
 		}
-	}
 
-	if bin, ok := arg.(*ast.BinaryExpr); ok && bin.Op == token.ADD {
-		a.Analyze(bin.X)
-		a.Analyze(bin.Y)
+	case *ast.Ident:
+		if expr.Obj != nil && expr.Obj.Decl != nil {
+			switch decl := expr.Obj.Decl.(type) {
+			case *ast.AssignStmt:
+				for _, rhs := range decl.Rhs {
+					a.Analyze(rhs)
+				}
+			case *ast.ValueSpec:
+				for _, val := range decl.Values {
+					a.Analyze(val)
+				}
+			case *ast.Field:
+				if tv, ok := a.Pass.GetTypeAndValue(expr); ok && tv.Value != nil {
+					a.runChecks(expr, strings.Trim(tv.Value.ExactString(), `"`))
+				}
+			}
+		}
+
+	case *ast.CompositeLit:
+		for _, elt := range expr.Elts {
+			a.Analyze(elt)
+		}
+
+	case *ast.KeyValueExpr:
+		if id, ok := expr.Key.(*ast.Ident); ok {
+			a.checkSensitiveData(id, id.Name)
+		}
+		a.Analyze(expr.Value)
+
+	case *ast.CallExpr:
+		for _, callArg := range expr.Args {
+			a.Analyze(callArg)
+		}
+
+	case *ast.UnaryExpr:
+		if expr.Op == token.AND {
+			a.Analyze(expr.X)
+		}
+
+	case *ast.SelectorExpr:
+		a.checkSensitiveData(expr.Sel, expr.Sel.Name)
+		a.Analyze(expr.X)
 	}
 }
 

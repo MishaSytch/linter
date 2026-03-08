@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var fieldConstructors = []string{"Object", "String", "Int", "Any", "AddString", "AddObject"}
+
 // IsFmtSprintf проверяет, является ли выражение вызовом функции fmt.Sprintf()
 func IsFmtSprintf(call *ast.CallExpr) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
@@ -23,46 +25,61 @@ func IsLogCall(pass model.Reporter, call *ast.CallExpr) bool {
 		return false
 	}
 
-	if x, ok := selector.X.(*ast.Ident); ok {
+	if selection, ok := pass.GetSelection(selector); ok {
+		if recv := selection.Recv(); recv != nil {
+			recvStr := recv.String()
+			for _, name := range model.LoggerList {
+				if strings.Contains(strings.ToLower(recvStr), strings.ToLower(name)) {
+					return true
+				}
+			}
+		}
+	}
+
+	if tv, ok := pass.GetTypeAndValue(selector.X); ok && tv.Type != nil {
+		typeStr := tv.Type.String()
 		for _, name := range model.LoggerList {
-			if x.Name == name {
+			if strings.Contains(strings.ToLower(typeStr), strings.ToLower(name)) {
 				return true
 			}
 		}
 	}
 
-	if selection, ok := pass.GetSelection(selector); ok {
-		recv := selection.Recv()
-		if recv != nil {
-			recvStr := recv.String()
-			for _, name := range model.LoggerList {
-				if strings.Contains(recvStr, name) {
-					return true
-				}
+	root := getRootResolver(selector.X)
+
+	if id, ok := root.(*ast.Ident); ok {
+		for _, name := range model.LoggerList {
+			if id.Name == name {
+				return true
+			}
+		}
+	}
+
+	if tv, ok := pass.GetTypeAndValue(root); ok {
+		typeStr := tv.Type.String()
+		for _, name := range model.LoggerList {
+			if strings.Contains(strings.ToLower(typeStr), strings.ToLower(name)) {
+				return true
 			}
 		}
 	}
 
 	if tv, ok := pass.GetTypeAndValue(call.Fun); ok {
 		typeStr := tv.Type.String()
-		for _, name := range model.LoggerList {
-			if strings.Contains(typeStr, name) && strings.Contains(typeStr, "Field") {
-				return true
-			}
-		}
-	}
-
-	if obj, ok := pass.GetObject(selector.Sel); ok {
-		if pkg := obj.Pkg(); pkg != nil {
-			pkgPath := pkg.Path()
+		if strings.Contains(typeStr, "Field") {
 			for _, name := range model.LoggerList {
-				if strings.Contains(pkgPath, name) {
+				if strings.Contains(strings.ToLower(typeStr), strings.ToLower(name)) {
 					return true
 				}
 			}
 		}
 	}
 
+	for _, name := range fieldConstructors {
+		if selector.Sel.Name == name {
+			return true
+		}
+	}
 	return false
 }
 

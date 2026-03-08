@@ -31,7 +31,9 @@ func (a *BaseAggregateAnalyzer) Analyze(arg ast.Expr) {
 
 	if call, ok := arg.(*ast.CallExpr); ok {
 		if util.IsFmtSprintf(call) && len(call.Args) > 0 {
-			a.Analyze(call.Args[0])
+			for _, arg := range call.Args {
+				a.Analyze(arg)
+			}
 			return
 		}
 	}
@@ -39,6 +41,71 @@ func (a *BaseAggregateAnalyzer) Analyze(arg ast.Expr) {
 	if bin, ok := arg.(*ast.BinaryExpr); ok && bin.Op == token.ADD {
 		a.Analyze(bin.X)
 		a.Analyze(bin.Y)
+	}
+
+	if tv, ok := a.Pass.GetTypeAndValue(arg); ok && tv.Value != nil {
+		msg := strings.Trim(tv.Value.ExactString(), `"`+"`")
+		if msg != "" {
+			a.runChecks(arg, msg)
+		}
+		return
+	}
+
+	switch expr := arg.(type) {
+	case *ast.BinaryExpr:
+		if expr.Op == token.ADD {
+			a.Analyze(expr.X)
+			a.Analyze(expr.Y)
+		}
+
+	case *ast.Ident:
+		if expr.Obj != nil && expr.Obj.Decl != nil {
+			switch decl := expr.Obj.Decl.(type) {
+			case *ast.AssignStmt:
+				for _, rhs := range decl.Rhs {
+					a.Analyze(rhs)
+				}
+			case *ast.ValueSpec:
+				for _, val := range decl.Values {
+					a.Analyze(val)
+				}
+			case *ast.Field:
+				if tv, ok := a.Pass.GetTypeAndValue(expr); ok && tv.Value != nil {
+					a.runChecks(expr, strings.Trim(tv.Value.ExactString(), `"`))
+				}
+			}
+		}
+
+	case *ast.CompositeLit:
+		for _, elt := range expr.Elts {
+			a.Analyze(elt)
+		}
+
+	case *ast.KeyValueExpr:
+		if id, ok := expr.Key.(*ast.Ident); ok {
+			a.applySensitiveFix(&analysisResult{
+				originalMsg: id.Name,
+				fixedMsg:    id.Name,
+			})
+		}
+		a.Analyze(expr.Value)
+
+	case *ast.CallExpr:
+		for _, callArg := range expr.Args {
+			a.Analyze(callArg)
+		}
+
+	case *ast.UnaryExpr:
+		if expr.Op == token.AND {
+			a.Analyze(expr.X)
+		}
+
+	case *ast.SelectorExpr:
+		a.applySensitiveFix(&analysisResult{
+			originalMsg: expr.Sel.Name,
+			fixedMsg:    expr.Sel.Name,
+		})
+		a.Analyze(expr.X)
 	}
 }
 
