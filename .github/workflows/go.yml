@@ -33,19 +33,17 @@ jobs:
       - name: Run Tests with Coverage
         run: go test -v -coverprofile=coverage.out ./...
 
-      - name: Build Plugin (Using Vendor)
+      - name: Build Everything (The Bulletproof Way)
         run: |
           CGO_ENABLED=1 go build -mod=vendor -buildmode=plugin -o loglint.so ./plugin/main.go
+          
+          GOFLAGS="-mod=mod" go mod download github.com/golangci/golangci-lint@v1.64.5
+          
+          CGO_ENABLED=1 go build -mod=vendor -o ./golangci-lint-bin github.com/golangci/golangci-lint/cmd/golangci-lint
 
-      - name: Cleanup Vendor
+      - name: Run golangci-lint
         run: |
-          rm -rf vendor
-          go mod tidy
-
-      - name: Install golangci-lint and Run
-        run: |
-          CGO_ENABLED=1 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
-          CGO_ENABLED=1 $(go env GOPATH)/bin/golangci-lint run --config=.golangci.yml ./internal/exampleProject/...
+          CGO_ENABLED=1 ./golangci-lint-bin run --config=.golangci.yml ./internal/exampleProject/...
         continue-on-error: true
 
       - name: Check Coverage Threshold
