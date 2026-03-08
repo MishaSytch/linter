@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/MishaSytch/linter/internal/exampleProject/internal"
+	"exampleProject/internal"
 	"log/slog"
 )
 

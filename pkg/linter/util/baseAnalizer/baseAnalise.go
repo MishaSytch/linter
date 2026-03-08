@@ -4,59 +4,113 @@ import (
 	"fmt"
 	"github.com/MishaSytch/linter/pkg/config"
 	"github.com/MishaSytch/linter/pkg/linter/model"
-	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
+	"go/token"
 	"golang.org/x/tools/go/analysis"
-	"regexp"
 	"strings"
 	"unicode"
 )
 
 // BaseAnalyzer базовый анализатор кода
-func BaseAnalyzer(pass model.Reporter, arg ast.Expr, config *config.Config) {
-	cfg = config
+type BaseAnalyzer struct {
+	Pass   model.Reporter
+	Config *config.Config
+}
 
-	var msg string
+var _ model.FunctionalAnalyzer = (*BaseAnalyzer)(nil)
 
-	if tv, ok := pass.TypesInfo().Types[arg]; ok && tv.Value != nil {
-		msg = strings.Trim(tv.Value.ExactString(), `"`+"`")
-	} else {
-		if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
-			BaseAnalyzer(pass, subCall.Args[0], config)
+func (a *BaseAnalyzer) Analyze(arg ast.Expr) {
+	if arg == nil {
+		return
+	}
+
+	if tv, ok := a.Pass.GetTypeAndValue(arg); ok && tv.Value != nil {
+		msg := strings.Trim(tv.Value.ExactString(), `"`+"`")
+		if msg != "" {
+			a.runChecks(arg, msg)
 		}
 		return
 	}
 
-	if msg == "" {
-		return
-	}
+	switch expr := arg.(type) {
+	case *ast.BinaryExpr:
+		if expr.Op == token.ADD {
+			a.Analyze(expr.X)
+			a.Analyze(expr.Y)
+		}
 
+	case *ast.Ident:
+		if expr.Obj != nil && expr.Obj.Decl != nil {
+			switch decl := expr.Obj.Decl.(type) {
+			case *ast.AssignStmt:
+				for _, rhs := range decl.Rhs {
+					a.Analyze(rhs)
+				}
+			case *ast.ValueSpec:
+				for _, val := range decl.Values {
+					a.Analyze(val)
+				}
+			case *ast.Field:
+				if tv, ok := a.Pass.GetTypeAndValue(expr); ok && tv.Value != nil {
+					a.runChecks(expr, strings.Trim(tv.Value.ExactString(), `"`))
+				}
+			}
+		}
+
+	case *ast.CompositeLit:
+		for _, elt := range expr.Elts {
+			a.Analyze(elt)
+		}
+
+	case *ast.KeyValueExpr:
+		if id, ok := expr.Key.(*ast.Ident); ok {
+			a.checkSensitiveData(id, id.Name)
+		}
+		a.Analyze(expr.Value)
+
+	case *ast.CallExpr:
+		for _, callArg := range expr.Args {
+			a.Analyze(callArg)
+		}
+
+	case *ast.UnaryExpr:
+		if expr.Op == token.AND {
+			a.Analyze(expr.X)
+		}
+
+	case *ast.SelectorExpr:
+		a.checkSensitiveData(expr.Sel, expr.Sel.Name)
+		a.Analyze(expr.X)
+	}
+}
+
+func (a *BaseAnalyzer) runChecks(arg ast.Expr, msg string) {
 	checkers := []errorsChecker{
-		checkFirstLetterCase,
-		checkTextSyntax,
-		checkSensitiveData,
+		a.checkFirstLetterCase,
+		a.checkTextSyntax,
+		a.checkSensitiveData,
 	}
 
 	for _, checker := range checkers {
-		checker(pass, arg, msg)
+		checker(arg, msg)
 	}
 }
 
 // checkFirstLetterCase проверяет, что сообщение начинается со строчной буквы
-func checkFirstLetterCase(pass model.Reporter, arg ast.Expr, msg string) {
+func (a *BaseAnalyzer) checkFirstLetterCase(arg ast.Expr, msg string) {
 	runes := []rune(msg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
 		runes[0] = unicode.ToLower(runes[0])
 		fixedMsg := string(runes)
 
 		var reportMsg string
-		if cfg.Output.TestRun {
+		if a.Config.Output.TestRun {
 			reportMsg = model.MsgLowerCaseRules
 		} else {
-			reportMsg = fmt.Sprintf("log message should start with a lowercase letter \n\tsuggested: \t%s", fixedMsg)
+			reportMsg = fmt.Sprintf("%s \n\tsuggested: \t%s", model.MsgLowerCaseRules, fixedMsg)
 		}
 
-		pass.Report(analysis.Diagnostic{
+		a.Pass.Report(analysis.Diagnostic{
 			Pos:     arg.Pos(),
 			Message: reportMsg,
 			SuggestedFixes: []analysis.SuggestedFix{
@@ -76,16 +130,16 @@ func checkFirstLetterCase(pass model.Reporter, arg ast.Expr, msg string) {
 }
 
 // checkTextSyntax проверяет отсутствие кириллицы и спецсимволов
-func checkTextSyntax(pass model.Reporter, arg ast.Expr, msg string) {
+func (a *BaseAnalyzer) checkTextSyntax(arg ast.Expr, msg string) {
 	errors := make(textErrors)
 	checkers := []textSyntaxChecker{
-		checkOnlyEnglishSyntax,
-		checkSpecialCharsSyntax,
+		a.checkOnlyEnglishSyntax,
+		a.checkSpecialCharsSyntax,
 	}
 
 	for _, r := range msg {
 		for _, check := range checkers {
-			check(pass, arg, errors, r)
+			check(arg, errors, r)
 		}
 
 		if len(errors) == len(checkers) {
@@ -95,41 +149,24 @@ func checkTextSyntax(pass model.Reporter, arg ast.Expr, msg string) {
 }
 
 // checkSensitiveData ищет утечки секретов в тексте сообщения
-func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
+func (a *BaseAnalyzer) checkSensitiveData(arg ast.Expr, msg string) {
 	fixedMsg := msg
 	lowerMsg := strings.ToLower(msg)
 	var allFoundIssues []string
 
-	for _, kw := range cfg.SensitiveRules.SensitiveWords {
-		lowerKw := strings.ToLower(kw)
-		if strings.Contains(lowerMsg, lowerKw) {
-			allFoundIssues = append(allFoundIssues, kw)
-			mask := strings.Repeat("*", len(kw))
-			fixedMsg = strings.ReplaceAll(fixedMsg, kw, mask)
-		}
-	}
-
-	for _, p := range cfg.SensitiveRules.Patterns {
-		re, err := regexp.Compile(p.Regex)
-		if err != nil {
-			continue
-		}
-
-		if re.MatchString(fixedMsg) {
-			allFoundIssues = append(allFoundIssues, p.Name)
-			fixedMsg = re.ReplaceAllString(fixedMsg, "********")
-		}
-	}
+	var newFoundIssues []string
+	fixedMsg, newFoundIssues = containSensitiveData(lowerMsg, a.Config)
+	allFoundIssues = append(allFoundIssues, newFoundIssues...)
 
 	if len(allFoundIssues) > 0 {
 		var reportMsg string
-		if cfg.Output.TestRun {
+		if a.Config.Output.TestRun {
 			reportMsg = fmt.Sprintf(model.MsgSensitiveData, strings.Join(allFoundIssues, ", "))
 		} else {
-			reportMsg = fmt.Sprintf("log message contains potentially sensitive data \n\tsuggested: \t%s", fixedMsg)
+			reportMsg = fmt.Sprintf("%s \n\tsuggested: \t%s", model.MsgSensitiveData, fixedMsg)
 		}
 
-		pass.Report(analysis.Diagnostic{
+		a.Pass.Report(analysis.Diagnostic{
 			Pos:     arg.Pos(),
 			Message: reportMsg,
 			SuggestedFixes: []analysis.SuggestedFix{
@@ -149,15 +186,15 @@ func checkSensitiveData(pass model.Reporter, arg ast.Expr, msg string) {
 }
 
 // checkOnlyEnglishSyntax проверяет, является ли символ буквой и входит ли он в латинский алфавит
-func checkOnlyEnglishSyntax(pass model.Reporter, arg ast.Expr, errors textErrors, r rune) {
-	if !errors[model.MsgEnglish] && unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z') {
-		pass.Reportf(arg.Pos(), model.MsgEnglish)
+func (a *BaseAnalyzer) checkOnlyEnglishSyntax(arg ast.Expr, errors textErrors, r rune) {
+	if !errors[model.MsgEnglish] && isNonEnglish(r) {
+		a.Pass.Reportf(arg.Pos(), model.MsgEnglish)
 		errors[model.MsgEnglish] = true
 	}
 }
 
 // checkSpecialCharsSyntax проверяет наличие спецсимволов и не-ASCII символов
-func checkSpecialCharsSyntax(pass model.Reporter, arg ast.Expr, errors textErrors, r rune) {
+func (a *BaseAnalyzer) checkSpecialCharsSyntax(arg ast.Expr, errors textErrors, r rune) {
 	if errors[model.MsgSpecialChars] {
 		return
 	}
@@ -173,19 +210,19 @@ func checkSpecialCharsSyntax(pass model.Reporter, arg ast.Expr, errors textError
 		}
 		fixedMsg := ""
 		for _, runeVal := range msg {
-			if runeVal <= 127 || unicode.IsLetter(runeVal) {
+			if !isSpecialChars(runeVal) {
 				fixedMsg += string(runeVal)
 			}
 		}
 
 		var reportMsg string
-		if cfg.Output.TestRun {
+		if a.Config.Output.TestRun {
 			reportMsg = model.MsgSpecialChars
 		} else {
 			reportMsg = fmt.Sprintf("%s  \n\tsuggested: \t%s", model.MsgSpecialChars, fixedMsg)
 		}
 
-		pass.Report(analysis.Diagnostic{
+		a.Pass.Report(analysis.Diagnostic{
 			Pos:     arg.Pos(),
 			Message: reportMsg,
 			SuggestedFixes: []analysis.SuggestedFix{

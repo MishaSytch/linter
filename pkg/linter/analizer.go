@@ -38,9 +38,6 @@ var Analyzer = &analysis.Analyzer{
 	Run: run,
 }
 
-// ArgumentAnalyzer функциональный тип для анализа кода
-type ArgumentAnalyzer func(pass model.Reporter, arg ast.Expr, config *config.Config)
-
 var configPath string
 
 func init() {
@@ -52,23 +49,29 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	wrapper := model.PassWrapper{Pass: pass}
 
-	var checkArg ArgumentAnalyzer
+	var checkArg model.FunctionalAnalyzer
 	if cfg.Output.ErrorsAggregate {
-		checkArg = baseAnalizer.BaseAggregateAnalyzer
+		checkArg = &baseAnalizer.BaseAggregateAnalyzer{
+			Pass:   wrapper,
+			Config: cfg,
+		}
 
 	} else {
-		checkArg = baseAnalizer.BaseAnalyzer
+		checkArg = &baseAnalizer.BaseAnalyzer{
+			Pass:   wrapper,
+			Config: cfg,
+		}
 	}
 
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 || !util.IsLogCall(call) {
+			if !ok || len(call.Args) == 0 || !util.IsLogCall(wrapper, call) {
 				return true
 			}
 
 			for _, arg := range call.Args {
-				checkArg(wrapper, arg, cfg)
+				checkArg.Analyze(arg)
 			}
 			return true
 		})
