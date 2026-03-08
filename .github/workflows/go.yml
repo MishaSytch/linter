@@ -39,7 +39,9 @@ jobs:
           cd /tmp/lint-build
           go mod init temp-lint
           
-          CGO_ENABLED=1 go build -o $GITHUB_WORKSPACE/golangci-lint-bin github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
+          go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
+          
+          CGO_ENABLED=1 go build -o $GITHUB_WORKSPACE/golangci-lint-bin github.com/golangci/golangci-lint/cmd/golangci-lint
           
           cd $GITHUB_WORKSPACE
 
