@@ -22,13 +22,6 @@ jobs:
       - name: Tidy dependencies
         run: go mod tidy
 
-      - name: Prepare Test Dependencies
-        run: |
-          go work vendor
-          mkdir -p internal/testdata/src/go.uber.org
-          cp -a vendor/go.uber.org/. internal/testdata/src/go.uber.org/
-          ls -R internal/testdata/src/go.uber.org/zap | head -n 5
-
       - name: Verify Dependencies
         run: go mod verify
 
@@ -59,9 +52,19 @@ jobs:
           go get golang.org/x/tools@v0.30.0 
           go mod tidy
 
+      - name: Align dependencies with golangci-lint
+        run: |
+          go get golang.org/x/tools@v0.30.0 
+          go get golang.org/x/mod@v0.25.0
+          go mod tidy
+          go work vendor 
+          mkdir -p internal/testdata/src/go.uber.org
+          cp -a vendor/go.uber.org/. internal/testdata/src/go.uber.org/
+          ls -R internal/testdata/src/go.uber.org/zap | head -n 5
+
       - name: Build Linter Plugin
         run: |
-          CGO_ENABLED=1 go build -buildmode=plugin -o loglint.so ./plugin/main.go
+          CGO_ENABLED=1 go build -mod=vendor -buildmode=plugin -o loglint.so ./plugin/main.go
 
       - name: Run golangci-lint
         run: |
