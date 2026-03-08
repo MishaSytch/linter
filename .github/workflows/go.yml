@@ -58,9 +58,11 @@ jobs:
           go get golang.org/x/mod@v0.25.0
           go mod tidy
           go work vendor 
-          mkdir -p internal/testdata/src/go.uber.org
-          cp -a vendor/go.uber.org/. internal/testdata/src/go.uber.org/
-          ls -R internal/testdata/src/go.uber.org/zap | head -n 5
+          
+          mkdir -p internal/testdata/src/go.uber.org/zap
+          mkdir -p internal/testdata/src/go.uber.org/multierr
+          cp -r vendor/go.uber.org/zap/. internal/testdata/src/go.uber.org/zap/
+          cp -r vendor/go.uber.org/multierr/. internal/testdata/src/go.uber.org/multierr/
 
       - name: Build Linter Plugin
         run: |
