@@ -6,36 +6,52 @@ import (
 	"github.com/MishaSytch/linter/pkg/linter/model"
 	"github.com/MishaSytch/linter/pkg/linter/util"
 	"go/ast"
+	"go/token"
 	"golang.org/x/tools/go/analysis"
 	"strings"
 	"unicode"
 )
 
-// BaseAggregateAnalyzer теперь собирает все правки воедино
-func BaseAggregateAnalyzer(pass model.Reporter, arg ast.Expr, config *config.Config) {
-	cfg = config
-	var msg string
+// BaseAggregateAnalyzer базовый анализатор кода c агрегацией ошибок
+type BaseAggregateAnalyzer struct {
+	Pass   model.Reporter
+	Config *config.Config
+}
 
-	if tv, ok := pass.TypesInfo().Types[arg]; ok && tv.Value != nil {
-		msg = strings.Trim(tv.Value.ExactString(), `"`+"`")
-	} else if subCall, ok := arg.(*ast.CallExpr); ok && util.IsFmtSprintf(subCall) && len(subCall.Args) > 0 {
-		BaseAnalyzer(pass, subCall.Args[0], config)
+var _ model.FunctionalAnalyzer = (*BaseAggregateAnalyzer)(nil)
+
+func (a *BaseAggregateAnalyzer) Analyze(arg ast.Expr) {
+	if tv, ok := a.Pass.GetTypeAndValue(arg); ok && tv.Value != nil {
+		msg := strings.Trim(tv.Value.ExactString(), `"`+"`")
+		if msg != "" {
+			a.runChecks(arg, msg)
+		}
 		return
 	}
 
-	if msg == "" {
-		return
+	if call, ok := arg.(*ast.CallExpr); ok {
+		if util.IsFmtSprintf(call) && len(call.Args) > 0 {
+			a.Analyze(call.Args[0])
+			return
+		}
 	}
 
+	if bin, ok := arg.(*ast.BinaryExpr); ok && bin.Op == token.ADD {
+		a.Analyze(bin.X)
+		a.Analyze(bin.Y)
+	}
+}
+
+func (a *BaseAggregateAnalyzer) runChecks(arg ast.Expr, msg string) {
 	res := &analysisResult{
 		originalMsg: msg,
 		fixedMsg:    msg,
 	}
 
 	checkers := []errorsCheckerAggregate{
-		applyFirstLetterFix,
-		applySyntaxFix,
-		applySensitiveFix,
+		a.applyFirstLetterFix,
+		a.applySyntaxFix,
+		a.applySensitiveFix,
 	}
 
 	for _, checker := range checkers {
@@ -43,11 +59,11 @@ func BaseAggregateAnalyzer(pass model.Reporter, arg ast.Expr, config *config.Con
 	}
 
 	if len(res.errors) > 0 {
-		reportCombined(pass, arg, res)
+		a.reportCombined(arg, res)
 	}
 }
 
-func applyFirstLetterFix(res *analysisResult) {
+func (a *BaseAggregateAnalyzer) applyFirstLetterFix(res *analysisResult) {
 	runes := []rune(res.fixedMsg)
 	if len(runes) > 0 && unicode.IsUpper(runes[0]) {
 		runes[0] = unicode.ToLower(runes[0])
@@ -56,15 +72,15 @@ func applyFirstLetterFix(res *analysisResult) {
 	}
 }
 
-func applySyntaxFix(res *analysisResult) {
+func (a *BaseAggregateAnalyzer) applySyntaxFix(res *analysisResult) {
 	runes := []rune(res.fixedMsg)
 	var cleanedRunes []rune
 
 	reportedErrors := make(textErrors)
 
 	syntaxCheckers := []textSyntaxCheckerWithBool{
-		checkOnlyEnglishSyntaxWithBool,
-		checkSpecialCharsSyntaxWithBool,
+		a.checkOnlyEnglishSyntaxWithBool,
+		a.checkSpecialCharsSyntaxWithBool,
 	}
 
 	for _, r := range runes {
@@ -86,13 +102,13 @@ func applySyntaxFix(res *analysisResult) {
 	res.fixedMsg = string(cleanedRunes)
 }
 
-func applySensitiveFix(res *analysisResult) {
+func (a *BaseAggregateAnalyzer) applySensitiveFix(res *analysisResult) {
 	fixedMsg := res.fixedMsg
 	lowerMsg := strings.ToLower(fixedMsg)
 	var foundIssues []string
 
 	var newFoundIssues []string
-	fixedMsg, newFoundIssues = containSensitiveData(lowerMsg)
+	fixedMsg, newFoundIssues = containSensitiveData(lowerMsg, a.Config)
 	foundIssues = append(foundIssues, newFoundIssues...)
 
 	if len(foundIssues) > 0 {
@@ -105,10 +121,10 @@ func applySensitiveFix(res *analysisResult) {
 	}
 }
 
-func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
-	if cfg.Output.TestRun {
+func (a *BaseAggregateAnalyzer) reportCombined(arg ast.Expr, res *analysisResult) {
+	if a.Config.Output.TestRun {
 		for _, errStr := range res.errors {
-			pass.Report(analysis.Diagnostic{
+			a.Pass.Report(analysis.Diagnostic{
 				Pos:     arg.Pos(),
 				Message: errStr,
 				SuggestedFixes: []analysis.SuggestedFix{
@@ -131,7 +147,7 @@ func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
 	var fullMessage string
 	errorList := "log message issues:\n  - " + strings.Join(res.errors, "\n  - ")
 
-	if cfg.Output.ShowInConsole {
+	if a.Config.Output.ShowInConsole {
 		fullMessage = fmt.Sprintf("%s\n\tsuggested:\t\"%s\"", errorList, res.fixedMsg)
 	} else {
 		fullMessage = errorList
@@ -142,7 +158,7 @@ func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
 		Message: fullMessage,
 	}
 
-	if cfg.Output.ShowSuggestions {
+	if a.Config.Output.ShowSuggestions {
 		diagnostic.SuggestedFixes = []analysis.SuggestedFix{
 			{
 				Message: "Apply all fixes",
@@ -157,12 +173,12 @@ func reportCombined(pass model.Reporter, arg ast.Expr, res *analysisResult) {
 		}
 	}
 
-	pass.Report(diagnostic)
+	a.Pass.Report(diagnostic)
 }
 
 // checkOnlyEnglishSyntaxWithBool проверяет, является ли символ буквой и входит ли он в латинский алфавит
 // и возвращает требование к исправлению
-func checkOnlyEnglishSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
+func (a *BaseAggregateAnalyzer) checkOnlyEnglishSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
 	isNonLatinLetter := isNonEnglish(r)
 
 	if isNonLatinLetter {
@@ -177,7 +193,7 @@ func checkOnlyEnglishSyntaxWithBool(res *analysisResult, r rune, reported textEr
 
 // checkSpecialCharsSyntaxWithBool проверяет наличие спецсимволов и не-ASCII символов
 // и возвращает требование к исправлению
-func checkSpecialCharsSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
+func (a *BaseAggregateAnalyzer) checkSpecialCharsSyntaxWithBool(res *analysisResult, r rune, reported textErrors) bool {
 	isSpecial := isSpecialChars(r)
 
 	if isSpecial {

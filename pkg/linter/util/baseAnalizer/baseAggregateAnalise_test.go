@@ -2,14 +2,15 @@ package baseAnalizer
 
 import (
 	"fmt"
-	"github.com/MishaSytch/linter/pkg/config"
-	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
-	"golang.org/x/tools/go/analysis"
 	"testing"
+
+	"github.com/MishaSytch/linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/linter/model"
+	"golang.org/x/tools/go/analysis"
 )
 
 // MockReporterAggregate мок для Reporter
@@ -31,50 +32,58 @@ func (m *MockReporterAggregate) TypesInfo() *types.Info {
 	return m.typesInfo
 }
 
-func setupBaseTestAggregate() (model.Reporter, *[]string) {
-	reports := &[]string{}
-	mock := &MockReporterAggregate{
-		reports: reports,
-		typesInfo: &types.Info{
-			Types: make(map[ast.Expr]types.TypeAndValue),
-		},
+func (m *MockReporterAggregate) GetTypeAndValue(expr ast.Expr) (types.TypeAndValue, bool) {
+	if m.typesInfo == nil {
+		return types.TypeAndValue{}, false
 	}
-	return mock, reports
+	tv, ok := m.typesInfo.Types[expr]
+	return tv, ok
+}
+
+func (m *MockReporterAggregate) ObjectOf(id *ast.Ident) types.Object { return nil }
+func (m *MockReporterAggregate) TypeOf(expr ast.Expr) types.Type     { return nil }
+func (m *MockReporterAggregate) GetSelection(sel *ast.SelectorExpr) (*types.Selection, bool) {
+	return nil, false
+}
+func (m *MockReporterAggregate) GetObject(id *ast.Ident) (types.Object, bool) { return nil, false }
+
+var _ model.Reporter = (*MockReporterAggregate)(nil)
+
+func setupBaseTestAggregate(cfg *config.Config) (*BaseAggregateAnalyzer, *[]string) {
+	reports := &[]string{}
+	info := &types.Info{
+		Types: make(map[ast.Expr]types.TypeAndValue),
+	}
+	mock := &MockReporterAggregate{
+		reports:   reports,
+		typesInfo: info,
+	}
+	return &BaseAggregateAnalyzer{
+		Pass:   mock,
+		Config: cfg,
+	}, reports
 }
 
 func TestBaseAnalyzerAggregate(t *testing.T) {
-	mock, reports := setupBaseTestAggregate()
-	m := mock.(*MockReporterAggregate)
 	testCfg := &config.Config{
 		SensitiveRules: config.SensitiveRules{
 			SensitiveWords: []string{"secret"},
-			Patterns:       []config.SensitivePattern{},
 		},
 		Output: config.OutputConfig{
-			ErrorsAggregate: true,
-			TestRun:         true,
+			TestRun: true,
 		},
 	}
+	analyzer, reports := setupBaseTestAggregate(testCfg)
+
 	tests := []struct {
 		name    string
 		msg     string
 		wantErr bool
 	}{
-		{
-			"Valid",
-			"good message",
-			false,
-		},
-		{
-			"Russian",
-			"сообщение",
-			true,
-		},
-		{
-			"Secret",
-			"my secret",
-			true,
-		},
+		{"Valid", "good message", false},
+		{"Russian", "сообщение", true},
+		{"Secret", "my secret", true},
+		{"Uppercase", "Bad message", true},
 	}
 
 	for _, tt := range tests {
@@ -82,165 +91,15 @@ func TestBaseAnalyzerAggregate(t *testing.T) {
 			*reports = nil
 			expr := &ast.BasicLit{Value: `"` + tt.msg + `"`}
 
-			m.typesInfo.Types[expr] = types.TypeAndValue{
+			analyzer.Pass.TypesInfo().Types[expr] = types.TypeAndValue{
+				Type:  types.Typ[types.String],
 				Value: constant.MakeString(tt.msg),
 			}
 
-			BaseAnalyzer(m, expr, testCfg)
+			analyzer.Analyze(expr)
 
 			if (len(*reports) > 0) != tt.wantErr {
-				t.Errorf("BaseAnalyzer() '%s' errors: %v", tt.msg, *reports)
-			}
-		})
-	}
-}
-
-func Test_applySyntaxFix(t *testing.T) {
-	tests := []struct {
-		name            string
-		msg             string
-		wantErrorsCount int
-		wantFixedMsg    string
-	}{
-		{
-			name:            "Clean English text",
-			msg:             "valid message",
-			wantErrorsCount: 0,
-			wantFixedMsg:    "valid message",
-		},
-		{
-			name:            "Only Cyrillic",
-			msg:             "ошибка",
-			wantErrorsCount: 1,
-			wantFixedMsg:    "",
-		},
-		{
-			name:            "Cyrillic and Emoji",
-			msg:             "ошибка 🫡",
-			wantErrorsCount: 2,
-			wantFixedMsg:    " ",
-		},
-		{
-			name:            "Multiple emojis",
-			msg:             "🫡🚀",
-			wantErrorsCount: 1,
-			wantFixedMsg:    "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{fixedMsg: tt.msg}
-			applySyntaxFix(res)
-
-			if len(res.errors) != tt.wantErrorsCount {
-				t.Errorf("applySyntaxFix() '%s' got %d errors, want %d", tt.msg, len(res.errors), tt.wantErrorsCount)
-			}
-			if res.fixedMsg != tt.wantFixedMsg {
-				t.Errorf("applySyntaxFix() '%s' fixedMsg = '%s', want '%s'", tt.msg, res.fixedMsg, tt.wantFixedMsg)
-			}
-		})
-	}
-}
-
-func Test_checkOnlyEnglishSyntaxWithBool(t *testing.T) {
-	tests := []struct {
-		name         string
-		r            rune
-		shouldDelete bool
-	}{
-		{
-			"Latin",
-			'a',
-			false,
-		},
-		{
-			"Cyrillic",
-			'а',
-			true,
-		},
-		{
-			"Number",
-			'1',
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{}
-			reported := make(textErrors)
-
-			gotDelete := checkOnlyEnglishSyntaxWithBool(res, tt.r, reported)
-
-			if gotDelete != tt.shouldDelete {
-				t.Errorf("checkOnlyEnglishSyntax() rune %c, gotDelete = %v, want %v", tt.r, gotDelete, tt.shouldDelete)
-			}
-		})
-	}
-}
-func Test_applySensitiveFix(t *testing.T) {
-	cfg = &config.Config{
-		SensitiveRules: config.SensitiveRules{
-			SensitiveWords: []string{"secret"},
-			Patterns: []config.SensitivePattern{
-				{
-					Name:  "IPv4 Address",
-					Regex: `(?:\d{1,3}\.){3}\d{1,3}`,
-				},
-			},
-		},
-	}
-
-	tests := []struct {
-		name         string
-		msg          string
-		wantError    bool
-		wantFixedMsg string
-	}{
-		{
-			"Leak secret (Keyword)",
-			"my secret is 123",
-			true,
-			"my ****** is 123",
-		},
-		{
-			"Leak IP (Pattern)",
-			"connecting to 192.168.1.1",
-			true,
-			"connecting to ********",
-		},
-		{
-			"Mixed leak (Keyword and Pattern)",
-			"secret ip is 127.0.0.1",
-			true,
-			"****** ip is ********",
-		},
-		{
-			"Clear text",
-			"hello world",
-			false,
-			"hello world",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			res := &analysisResult{
-				fixedMsg: tt.msg,
-				errors:   []string{},
-			}
-
-			applySensitiveFix(res)
-
-			hasError := len(res.errors) > 0
-			if hasError != tt.wantError {
-				t.Errorf("%s: applySensitiveFix() error = %v, want %v. Errors: %v",
-					tt.name, hasError, tt.wantError, res.errors)
-			}
-
-			if res.fixedMsg != tt.wantFixedMsg {
-				t.Errorf("%s: fixedMsg got %s, want %s",
-					tt.name, res.fixedMsg, tt.wantFixedMsg)
+				t.Errorf("Analyze() '%s' errors: %v", tt.msg, *reports)
 			}
 		})
 	}

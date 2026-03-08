@@ -27,4 +27,4 @@ output:
   show_in_console: true
   show_suggestions: true
   errors_aggregate: false
-  is_test: false
+  is_test: true

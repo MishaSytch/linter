@@ -7,8 +7,6 @@ import (
 	"unicode"
 )
 
-var cfg *config.Config
-
 func isSpecialChars(r rune) bool {
 	return r > 127 && !unicode.IsLetter(r)
 }
@@ -17,7 +15,7 @@ func isNonEnglish(r rune) bool {
 	return unicode.IsLetter(r) && (r < 'A' || (r > 'Z' && r < 'a') || r > 'z')
 }
 
-func containSensitiveData(msg string) (fixedMsg string, allFoundIssues []string) {
+func containSensitiveData(msg string, cfg *config.Config) (fixedMsg string, allFoundIssues []string) {
 	for _, kw := range cfg.SensitiveRules.SensitiveWords {
 		lowerKw := strings.ToLower(kw)
 		if strings.Contains(msg, lowerKw) {

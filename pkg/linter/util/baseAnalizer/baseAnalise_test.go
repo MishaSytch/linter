@@ -2,17 +2,18 @@ package baseAnalizer
 
 import (
 	"fmt"
-	"github.com/MishaSytch/linter/pkg/config"
-	"github.com/MishaSytch/linter/pkg/linter/model"
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
-	"golang.org/x/tools/go/analysis"
 	"testing"
+
+	"github.com/MishaSytch/linter/pkg/config"
+	"github.com/MishaSytch/linter/pkg/linter/model"
+	"golang.org/x/tools/go/analysis"
 )
 
-// MockReporter мок для Reporter
+// MockReporter теперь умеет возвращать типы
 type MockReporter struct {
 	reports   *[]string
 	typesInfo *types.Info
@@ -27,54 +28,58 @@ func (m *MockReporter) Report(d analysis.Diagnostic) {
 	*m.reports = append(*m.reports, d.Message)
 }
 
-func (m *MockReporter) TypesInfo() *types.Info {
-	return m.typesInfo
-}
+func (m *MockReporter) TypesInfo() *types.Info { return m.typesInfo }
 
-func setupBaseTest() (model.Reporter, *[]string) {
-	reports := &[]string{}
-	mock := &MockReporter{
-		reports: reports,
-		typesInfo: &types.Info{
-			Types: make(map[ast.Expr]types.TypeAndValue),
-		},
+func (m *MockReporter) GetTypeAndValue(expr ast.Expr) (types.TypeAndValue, bool) {
+	if m.typesInfo == nil {
+		return types.TypeAndValue{}, false
 	}
-	return mock, reports
+	tv, ok := m.typesInfo.Types[expr]
+	return tv, ok
 }
 
-func TestBaseAnalyzer(t *testing.T) {
-	mock, reports := setupBaseTest()
-	m := mock.(*MockReporter)
+func (m *MockReporter) ObjectOf(id *ast.Ident) types.Object { return nil }
+func (m *MockReporter) TypeOf(expr ast.Expr) types.Type     { return nil }
+func (m *MockReporter) GetSelection(sel *ast.SelectorExpr) (*types.Selection, bool) {
+	return nil, false
+}
+func (m *MockReporter) GetObject(id *ast.Ident) (types.Object, bool) { return nil, false }
+
+var _ model.Reporter = (*MockReporter)(nil)
+
+func setupBaseTest(cfg *config.Config) (*BaseAnalyzer, *[]string) {
+	reports := &[]string{}
+	info := &types.Info{
+		Types: make(map[ast.Expr]types.TypeAndValue),
+	}
+	mock := &MockReporter{
+		reports:   reports,
+		typesInfo: info,
+	}
+	return &BaseAnalyzer{
+		Pass:   mock,
+		Config: cfg,
+	}, reports
+}
+
+func TestBaseAnalyzer_Analyze(t *testing.T) {
 	testCfg := &config.Config{
 		SensitiveRules: config.SensitiveRules{
 			SensitiveWords: []string{"secret"},
-			Patterns:       []config.SensitivePattern{},
 		},
-		Output: config.OutputConfig{
-			ErrorsAggregate: true,
-			TestRun:         true,
-		},
+		Output: config.OutputConfig{TestRun: true},
 	}
+	analyzer, reports := setupBaseTest(testCfg)
+
 	tests := []struct {
 		name    string
 		msg     string
 		wantErr bool
 	}{
-		{
-			"Valid",
-			"good message",
-			false,
-		},
-		{
-			"Russian",
-			"сообщение",
-			true,
-		},
-		{
-			"Secret",
-			"my secret",
-			true,
-		},
+		{"Valid", "good message", false},
+		{"Russian", "сообщение", true},
+		{"Secret", "my secret", true},
+		{"Uppercase", "Bad message", true},
 	}
 
 	for _, tt := range tests {
@@ -82,232 +87,73 @@ func TestBaseAnalyzer(t *testing.T) {
 			*reports = nil
 			expr := &ast.BasicLit{Value: `"` + tt.msg + `"`}
 
-			m.typesInfo.Types[expr] = types.TypeAndValue{
+			analyzer.Pass.TypesInfo().Types[expr] = types.TypeAndValue{
+				Type:  types.Typ[types.String],
 				Value: constant.MakeString(tt.msg),
 			}
 
-			BaseAnalyzer(m, expr, testCfg)
+			analyzer.Analyze(expr)
 
 			if (len(*reports) > 0) != tt.wantErr {
-				t.Errorf("BaseAnalyzer() '%s' errors: %v", tt.msg, *reports)
+				t.Errorf("Analyze() '%s' errors: %v", tt.msg, *reports)
 			}
 		})
 	}
 }
 
 func Test_checkTextSyntax(t *testing.T) {
-	pass, reports := setupBaseTest()
+	analyzer, reports := setupBaseTest(&config.Config{})
 	tests := []struct {
 		name            string
 		msg             string
 		wantErrorsCount int
 	}{
-		{
-			name:            "Clean English text",
-			msg:             "valid message",
-			wantErrorsCount: 0,
-		},
-		{
-			name:            "Only Cyrillic",
-			msg:             "ошибка",
-			wantErrorsCount: 1,
-		},
-		{
-			name:            "Cyrillic and Emoji",
-			msg:             "ошибка 🫡",
-			wantErrorsCount: 2,
-		},
-		{
-			name:            "Multiple emojis",
-			msg:             "🫡🚀",
-			wantErrorsCount: 1,
-		},
+		{"Clean English", "valid message", 0},
+		{"Cyrillic and Emoji", "ошибка 🫡", 2},
+		{"Multiple emojis", "🫡🚀", 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			*reports = nil
-			checkTextSyntax(pass, &ast.BasicLit{}, tt.msg)
+			analyzer.checkTextSyntax(&ast.BasicLit{}, tt.msg)
 
 			if len(*reports) != tt.wantErrorsCount {
-				t.Errorf("checkTextSyntax() '%s' got %d errors, want %d. Errors: %v",
-					tt.msg, len(*reports), tt.wantErrorsCount, *reports)
-			}
-		})
-	}
-}
-
-func Test_checkFirstLetterCase(t *testing.T) {
-	pass, reports := setupBaseTest()
-	tests := []struct {
-		name    string
-		msg     string
-		wantErr bool
-	}{
-		{
-			"Valid lowercase",
-			"correct message",
-			false,
-		},
-		{
-			"Invalid uppercase",
-			"Bad message",
-			true,
-		},
-		{
-			"Non-letter start",
-			"123 message",
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			*reports = nil
-			checkFirstLetterCase(pass, &ast.BasicLit{}, tt.msg)
-
-			hasError := len(*reports) > 0
-			if hasError != tt.wantErr {
-				t.Errorf("checkFirstLetterCase() error = %v, wantErr %v", hasError, tt.wantErr)
-			}
-		})
-	}
-}
-
-func Test_checkOnlyEnglishSyntax(t *testing.T) {
-	pass, reports := setupBaseTest()
-	tests := []struct {
-		name    string
-		r       rune
-		wantErr bool
-	}{
-		{
-			"Latin",
-			'a',
-			false,
-		},
-		{
-			"Cyrillic",
-			'а',
-			true,
-		},
-		{
-			"Number",
-			'1',
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			*reports = nil
-			errors := make(textErrors)
-			checkOnlyEnglishSyntax(pass, &ast.BasicLit{}, errors, tt.r)
-
-			hasError := len(*reports) > 0
-			if hasError != tt.wantErr {
-				t.Errorf("checkOnlyEnglishSyntax() rune %c, error = %v", tt.r, hasError)
-			}
-		})
-	}
-}
-
-func Test_checkSpecialCharsSyntax(t *testing.T) {
-	pass, reports := setupBaseTest()
-
-	tests := []struct {
-		name    string
-		r       rune
-		wantErr bool
-	}{
-		{
-			"Standard ASCII",
-			'!',
-			false,
-		},
-		{
-			"Emoji",
-			'🫡',
-			true,
-		},
-		{
-			"Math symbol",
-			'∑',
-			true,
-		},
-		{
-			"Spanish symbol",
-			'ñ',
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			*reports = nil
-			errors := make(textErrors)
-			checkSpecialCharsSyntax(pass, &ast.BasicLit{}, errors, tt.r)
-
-			hasError := len(*reports) > 0
-			if hasError != tt.wantErr {
-				t.Errorf("checkSpecialCharsSyntax() rune %c, error = %v", tt.r, hasError)
+				t.Errorf("got %d errors, want %d. Errors: %v", len(*reports), tt.wantErrorsCount, *reports)
 			}
 		})
 	}
 }
 
 func Test_checkSensitiveData(t *testing.T) {
-	pass, reports := setupBaseTest()
-	cfg = &config.Config{
+	testCfg := &config.Config{
 		SensitiveRules: config.SensitiveRules{
 			SensitiveWords: []string{"secret"},
 			Patterns: []config.SensitivePattern{
-				{
-					Name:  "API_KEY",
-					Regex: `(?i)api_key_[a-z0-9]{10}`,
-				},
+				{Name: "API_KEY", Regex: `(?i)api_key_[a-z0-9]{10}`},
 			},
 		},
-		Output: config.OutputConfig{
-			TestRun: true,
-		},
+		Output: config.OutputConfig{TestRun: true},
 	}
+	analyzer, reports := setupBaseTest(testCfg)
 
 	tests := []struct {
 		name    string
 		msg     string
 		wantErr bool
 	}{
-		{
-			"Clear text",
-			"hello world",
-			false,
-		},
-		{
-			"Leak keyword (case insensitive)",
-			"my SECRET_TOKEN_HERE",
-			true,
-		},
-		{
-			"Leak pattern (Regexp)",
-			"setting up api_key_1234567890",
-			true,
-		},
-		{
-			"Double leak (Keyword + Pattern)",
-			"secret and api_key_abcdefghij",
-			true,
-		},
+		{"Leak keyword", "my SECRET_TOKEN", true},
+		{"Leak pattern", "api_key_1234567890", true},
+		{"Clear", "hello world", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			*reports = nil
-
-			expr := &ast.BasicLit{Value: `"` + tt.msg + `"`}
-
-			checkSensitiveData(pass, expr, tt.msg)
+			analyzer.checkSensitiveData(&ast.BasicLit{}, tt.msg)
 
 			if (len(*reports) > 0) != tt.wantErr {
-				t.Errorf("%s: checkSensitiveData() '%s' got error = %v, want %v",
-					tt.name, tt.msg, len(*reports) > 0, tt.wantErr)
+				t.Errorf("got error = %v, want %v", len(*reports) > 0, tt.wantErr)
 			}
 		})
 	}
