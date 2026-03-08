@@ -23,11 +23,24 @@ jobs:
         run: |
           go test -v -coverprofile=coverage.out ./...
 
-      - name: Build Plugin and Install Linter
+      - name: Synchronize and Build (Plugin + Linter)
         run: |
+          go get golang.org/x/tools@v0.30.0
+          go get golang.org/x/mod@v0.25.0
+          go mod tidy
+          
           CGO_ENABLED=1 go build -buildmode=plugin -o loglint.so ./plugin/main.go
-          CGO_ENABLED=1 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
-          cp $(go env GOPATH)/bin/golangci-lint ./golangci-lint-bin
+          
+          mkdir -p /tmp/lint-build
+          cd /tmp/lint-build
+          go mod init temp-lint
+          go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
+          
+          go mod edit -require=golang.org/x/tools@v0.30.0
+          
+          CGO_ENABLED=1 go build -o $GITHUB_WORKSPACE/golangci-lint-bin github.com/golangci/golangci-lint/cmd/golangci-lint
+          
+          cd $GITHUB_WORKSPACE
 
       - name: Run golangci-lint
         run: |
