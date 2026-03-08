@@ -1,4 +1,4 @@
-# LogLint (v1.0.0-alpha)
+# LogLint (v1.0.0)
 
 LogLint — это специализированный линтер для Go, разработанный для контроля качества логирования. Он проверяет сообщения логгеров (`log`, `slog`, `zap` и объекта `logger`) на соответствие правилам стиля проекта.
 
@@ -23,8 +23,8 @@ LogLint — это специализированный линтер для Go, 
 ```go
 logErr := func(m string) {
   logger.Error(m)
-  }
-  logErr("Upper case error")
+}
+logErr("Upper case error")
 ```
 
 ## Запуск
