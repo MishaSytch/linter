@@ -20,7 +20,7 @@ func containSensitiveData(msg string, cfg *config.Config) (fixedMsg string, allF
 		lowerKw := strings.ToLower(kw)
 		if strings.Contains(msg, lowerKw) {
 			allFoundIssues = append(allFoundIssues, kw)
-			mask := strings.Repeat("*", len(kw))
+			mask := strings.Repeat("*", 8)
 			msg = strings.ReplaceAll(msg, kw, mask)
 		}
 	}
@@ -33,7 +33,8 @@ func containSensitiveData(msg string, cfg *config.Config) (fixedMsg string, allF
 
 		if re.MatchString(msg) {
 			allFoundIssues = append(allFoundIssues, p.Name)
-			msg = re.ReplaceAllString(msg, "********")
+			mask := strings.Repeat("*", 8)
+			msg = re.ReplaceAllString(msg, mask)
 		}
 	}
 
