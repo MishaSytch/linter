@@ -19,13 +19,35 @@ LogLint — это специализированный линтер для Go, 
 
 ### 3. Ограничения анализа:
 - Линтер не может анализировать строки, возвращаемые функциями в рантайме (например, `log.Print(msgFromFunc())`)
-- Если в проекте используется собственная функция-обертка над логгером Пример: 
-```go
-logErr := func(m string) {
-  logger.Error(m)
-}
-logErr("Upper case error")
-```
+- Если в проекте используется собственная функция-обертка над логгером, он ее пропустит, так как это уже не статический анализ
+  
+  Пример: 
+  ```go
+  logErr := func(m string) {
+    logger.Error(m)
+  }
+  logErr("Upper case error")
+  ```
+  Но, если в передоваемой строке или объекте есть намек на указанные в конфиге правила – линтер выведет замечание
+  
+  Пример из теста:
+  
+  -  Выводится два замечания, так как "token" встречается в двух местах
+  ``` go
+  func (r *Request) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+  	enc.AddString("id", r.ID)
+  	enc.AddString("token", r.Token) // want "log message contains potentially sensitive data: token" "log message contains potentially sensitive data: token"
+  	return nil
+  }
+  ```
+  
+  -  Ограничиваем только вывод, а не наличие поля в структуре
+  ``` go
+  _ = &Request{ID: "123", Token: "secret-abc"} // здесь должно быть нормально, так как мы не выводим никуда эту структуру
+  
+  req := &Request{ID: "123", Token: "secret-abc"} // want "log message contains potentially sensitive data: secret" "log message contains potentially sensitive data: token" "log message contains potentially sensitive data: secret" "log message contains potentially sensitive data: token"
+  logger.Info("processing request", zap.Object("req", req))
+  ```
 
 ## Запуск
 
