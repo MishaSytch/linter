@@ -84,6 +84,7 @@ func TestBaseAnalyzerAggregate(t *testing.T) {
 		{"Russian", "сообщение", true},
 		{"Secret", "my secret", true},
 		{"Uppercase", "Bad message", true},
+		{"All", "Bad message good message сообщение my secret", true},
 	}
 
 	for _, tt := range tests {
